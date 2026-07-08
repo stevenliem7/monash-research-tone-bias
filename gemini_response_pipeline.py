@@ -1,15 +1,20 @@
 """
+Authors: 
+    Steven Liem (steven.liem@sydney.edu.au)
+
 This script is used to generate a corpus of speech data from the Heet dataset using the Gemini 3.1 Flash Live Preview model.
 
 Usage:
-    python gemini_tts_pipeline.py --input <input_path> --output-dir <output_dir> --dry-run --limit <limit>
-    Dry run: 
+    python gemini_response_pipeline.py --input <input_path> --output-dir <output_dir> --dry-run --limit <limit>
 
 Arguments:
     --input: Path to the input CSV file containing the questions and emotions.
     --output-dir: Path to the output directory where the generated speech data will be saved.
     --dry-run: If set, the script will run in dry mode and only generate the first 10 speech files.
     --limit: Maximum number of speech files to generate.
+
+References:
+    https://github.com/google-gemini/gemini-live-api-examples
 """
 
 import argparse
@@ -31,11 +36,22 @@ DEFAULT_OUTPUT_DIR = "/home/steve/tmp/Monash Research Code/our_speech_corpus"
 
 load_dotenv()
 
-gemini_api_key = os.getenv("GEMINI_API_KEY")
+gemini_api_key = os.getenv("GEMINI_API_KEY") # Remember to setup Gemini API key in environment variables!
 if not gemini_api_key:
     raise RuntimeError("GEMINI_API_KEY not found in environment variables")
 
+
 def save_pcm_to_16khz_wav(pcm_bytes, filename):
+    """
+    Save the Gemini model's audio output to a 16kHz WAV file. This is required because the Gemini model outputs 24kHz WAV files.
+
+    Args:
+        pcm_bytes: The Gemini model's audio output to save.
+        filename: The filename to save the WAV file to.
+
+    Returns:
+        None
+    """
     audio_data = np.frombuffer(pcm_bytes, dtype=np.int16)
     num_samples = int(len(audio_data) * 16000 / 24000)
     resampled_data = signal.resample(audio_data, num_samples).astype(np.int16)
@@ -47,6 +63,18 @@ def save_pcm_to_16khz_wav(pcm_bytes, filename):
 
 
 async def generate_corpus(input_path, output_dir, limit, checkpoint_every=25):
+    """
+    Generate a corpus of speech data from the cleaned Heet dataset using the Gemini 3.1 Flash Live Preview model.
+
+    Args:
+        input_path: Path to the input CSV file containing the questions and emotions.
+        output_dir: Path to the output directory where the generated speech data will be saved.
+        limit: Maximum number of speech files to generate.
+        checkpoint_every: Number of speech files to generate before writing to the CSV file.
+
+    Returns:
+        None
+    """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -70,10 +98,13 @@ async def generate_corpus(input_path, output_dir, limit, checkpoint_every=25):
         emotion = row["emotion_label"]
         bin_label = row["valence_label"]
         prompt = f"The user is currently speaking in a **{emotion}** tone: {row['Question']}"
+        
+        # Format the filename as: <question_number>_<emotion>_<bin_label>.wav
         filename = f"{question_number}_{emotion}_{bin_label}.wav"
         filepath = output_dir / filename
 
         try:
+            # Main entry point for the Gemini model. Check the references for more details.
             async with client.aio.live.connect(model=MODEL, config=config) as session:
                 await session.send(input=prompt, end_of_turn=True)
 
@@ -102,10 +133,12 @@ async def generate_corpus(input_path, output_dir, limit, checkpoint_every=25):
             failed += 1
             print(f"Failed {filename}: {e}")
 
+        # Write to CSV file every 25 speech files. This checkpoint mechanism is designed in case of failure during long running tasks.
         if (success + failed) % checkpoint_every == 0:
             df.to_csv(input_path, index=False)
             print(f"Checkpoint: wrote {input_path}")
 
+        # Sleep for 1 second to avoid Gemini API rate limits. This can be eliminated if you have a paid Gemini API account.
         await asyncio.sleep(1)
 
     df.to_csv(input_path, index=False)
@@ -121,7 +154,7 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
-    limit = 10 if args.dry_run else args.limit
+    limit = 10 if args.dry_run else args.limit # Dry run default to generating 10 speech files.
     asyncio.run(generate_corpus(args.input, args.output_dir, limit))
 
 
