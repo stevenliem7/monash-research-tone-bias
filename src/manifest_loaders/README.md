@@ -27,4 +27,5 @@ These two manifests are consumed by the matching cleaners in `src/cleaners/` to 
 | `extract_iemocap_synth_cleaned.py` | No | Local IEMOCAP_SYN CosyVoice2 JSON + wavs |
 | `extract_tess_human_cleaned.py` | No | Local TESS wavs |
 | `extract_tess_indextts_cleaned.py` | No | Local TESS_SYN IndexTTS JSON + wavs |
+| `extract_styletalk_cleaned.py` | No | Local StyleTalk CSVs + audio/ |
 | `clean_heet_dataset.py` | No | Its own Heet CSV |
