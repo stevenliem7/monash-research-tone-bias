@@ -10,8 +10,8 @@ Clean Heet's dataset to prepare for emotion classification and tone bias analysi
   5. Output heet_dataset_clean.csv
 
 Usage:
-    python clean_heet_dataset.py
-    python clean_heet_dataset.py --input heet_dataset.csv --output heet_dataset_clean.csv --seed 42
+    uv run python clean_heet_dataset.py
+    uv run python clean_heet_dataset.py --input heet_dataset.csv --output heet_dataset_clean.csv --seed 42
 
 References:
     None

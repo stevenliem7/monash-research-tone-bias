@@ -11,8 +11,8 @@ The full pipeline is as follows:
   4. Rename as emovoice_{n}_{emotion}_{valence}.wav
 
 Usage:
-    python extract_emovoice_cleaned.py
-    python extract_emovoice_cleaned.py --source <path> --output <path> --seed 42
+    uv run python extract_emovoice_cleaned.py
+    uv run python extract_emovoice_cleaned.py --source <path> --output <path> --seed 42
 
 References:
     None

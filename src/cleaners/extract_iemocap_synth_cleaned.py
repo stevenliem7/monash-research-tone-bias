@@ -4,8 +4,7 @@ Authors:
     Steven Liem (steven.liem@sydney.edu.au)
 
 Create a balanced 1,200-file CosyVoice2 IEMOCAP subset for SER / tone-bias
-analysis. Upstream CosyVoice IEMOCAP only ships 4 emotions. The full pipeline
-is as follows:
+analysis. Upstream CosyVoice IEMOCAP only ships 4 emotions. The full pipeline is as follows:
   1. Load train.json / test.json and resolve local wav paths
   2. Stratified sample with seed=42: 400 happy, 400 neutral,
      200 angry + 200 sad (400 negative)
@@ -13,7 +12,7 @@ is as follows:
   4. Rename as iemocap_synth_{n}_{emotion}_{valence}.wav
 
 Usage:
-    python extract_iemocap_synth_cleaned.py
+    uv run python extract_iemocap_synth_cleaned.py
 
 References:
     None

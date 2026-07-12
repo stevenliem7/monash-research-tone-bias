@@ -12,7 +12,7 @@ The full pipeline is as follows:
   4. Rename as tess_human_{n}_{emotion}_{valence}.wav
 
 Usage:
-    python extract_tess_human_cleaned.py
+    uv run python extract_tess_human_cleaned.py
 
 References:
     None

@@ -11,7 +11,7 @@ Surprised is excluded as valence-ambiguous. The full pipeline is as follows:
   4. Rename as tess_indextts_{n}_{emotion}_{valence}.wav
 
 Usage:
-    python extract_tess_indextts_cleaned.py
+    uv run python extract_tess_indextts_cleaned.py
 
 References:
     None

@@ -7,7 +7,7 @@ Download a balanced 1,200-file DeepDialogue-XTTS subset for SER / tone-bias anal
 Only sampled segment wavs are fetched from Hugging Face and downloaded into the cleaned output directory.
 
 Usage:
-    python extract_deepdialogue_xtts_cleaned.py
+    uv run python extract_deepdialogue_xtts_cleaned.py
 
 References:
     https://huggingface.co/datasets/SALT-Research/DeepDialogue-xtts
