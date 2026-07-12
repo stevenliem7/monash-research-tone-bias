@@ -5,7 +5,8 @@ Authors:
 This script is used to generate a corpus of speech data from the Heet dataset using the Gemini 3.1 Flash Live Preview model.
 
 Usage:
-    python gemini_response_pipeline.py --input <input_path> --output-dir <output_dir> --dry-run --limit <limit>
+    uv run python gemini_response_pipeline.py
+    uv run python gemini_response_pipeline.py --input <input_path> --output-dir <output_dir> --dry-run --limit <limit>
 
 Arguments:
     --input: Path to the input CSV file containing the questions and emotions.
@@ -29,9 +30,9 @@ from dotenv import load_dotenv
 from google import genai
 from scipy import signal
 
-MODEL = "gemini-2.5-flash-native-audio-latest"
+MODEL = "gemini-3.1-flash-live-preview"
 DEFAULT_INPUT = "/home/steve/tmp/Monash Research Code/monash-research-tone-bias/heet_dataset_clean.csv"
-DEFAULT_OUTPUT_DIR = "/home/steve/tmp/Monash Research Code/our_speech_corpus"
+DEFAULT_OUTPUT_DIR = "/home/steve/tmp/Monash Research Code/our_speech_corpus_test"
 
 load_dotenv()
 API_KEY = os.getenv("GEMINI_API_KEY")
