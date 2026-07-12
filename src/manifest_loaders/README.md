@@ -8,11 +8,11 @@ Scripts that stream **metadata only** from Hugging Face (no full audio download)
 | `load_iemocap_human_manifest.py` | [AbstractTTS/IEMOCAP](https://huggingface.co/datasets/AbstractTTS/IEMOCAP) | `manifests/manifest_iemocap_hf.csv` |
 
 ```bash
-python load_deepdialogue_manifest.py --dry-run   # 200 rows, no CSV write
-python load_deepdialogue_manifest.py             # full extract
+uv run python load_deepdialogue_manifest.py --dry-run   # 200 rows, no CSV write
+uv run python load_deepdialogue_manifest.py             # full extract
 
-python load_iemocap_human_manifest.py --dry-run # Similarly, only extract 200 rows, no CSV write
-python load_iemocap_human_manifest.py
+uv run python load_iemocap_human_manifest.py --dry-run # Similarly, only extract 200 rows, no CSV write
+uv run python load_iemocap_human_manifest.py
 ```
 
 These two manifests are consumed by the matching cleaners in `src/cleaners/` to build the 1,200-file subsets under `corpora_cleaned/`.

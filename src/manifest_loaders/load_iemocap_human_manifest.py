@@ -9,8 +9,8 @@ Extract a metadata-only manifest from Hugging Face's IEMOCAP (human) corpus. Doe
   4. Write manifests/manifest_iemocap_hf.csv
 
 Usage:
-    python load_iemocap_human_manifest.py
-    python load_iemocap_human_manifest.py --dry-run
+    uv run python load_iemocap_human_manifest.py
+    uv run python load_iemocap_human_manifest.py --dry-run
 
 References:
     https://huggingface.co/datasets/AbstractTTS/IEMOCAP

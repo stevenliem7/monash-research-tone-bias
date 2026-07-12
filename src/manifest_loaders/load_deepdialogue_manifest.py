@@ -10,8 +10,8 @@ Extract a metadata-only manifest from Hugging Face DeepDialogue-xtts (243k rows)
   4. Write manifests/manifest_deepdialogue_hf.csv
 
 Usage:
-    python load_deepdialogue_manifest.py
-    python load_deepdialogue_manifest.py --dry-run
+    uv run python load_deepdialogue_manifest.py
+    uv run python load_deepdialogue_manifest.py --dry-run
 
 References:
     https://huggingface.co/datasets/SALT-Research/DeepDialogue-xtts
