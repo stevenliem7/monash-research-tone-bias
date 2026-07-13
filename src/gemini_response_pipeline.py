@@ -16,6 +16,8 @@ Arguments:
 
 References:
     https://github.com/google-gemini/gemini-live-api-examples
+    https://ai.google.dev/gemini-api/docs/live-guide#audio-transcription
+
 """
 
 import argparse
@@ -81,17 +83,14 @@ async def generate_corpus(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     df = pd.read_csv(input_path)
-    if "audio_path" not in df.columns:
-        df["audio_path"] = ""
-    else:
-        df["audio_path"] = (
-            df["audio_path"].fillna("").astype(str).replace({"nan": "", "None": "", "NaN": ""})
-        )
 
     work = df.head(limit) if limit is not None else df
 
     client = genai.Client(api_key=API_KEY)
 
+    # Live API supports one primary response modality. Keep AUDIO and enable
+    # output_audio_transcription to stream the spoken reply as text.
+    # See: https://ai.google.dev/gemini-api/docs/live-guide#audio-transcription
     config = {
         "response_modalities": ["AUDIO"],
         "system_instruction": {"parts": [{"text": "You are Gemini, an AI personal assistant. Answer the user's question in **exactly one short sentence** in under 7 seconds."}]},
@@ -110,7 +109,7 @@ async def generate_corpus(
         filename = f"{question_number}_{emotion}_{bin_label}.wav"
         filepath = output_dir / filename
 
-        if filepath.exists():
+        if filepath.exists() and df.at[i, "response_text"]:
             df.at[i, "audio_path"] = str(filepath)
             skipped += 1
             continue
@@ -121,20 +120,32 @@ async def generate_corpus(
                 await session.send(input=prompt, end_of_turn=True)
 
                 audio_chunks = bytearray()
+                transcript_chunks: list[str] = []
                 async for response in session.receive():
                     server_content = response.server_content
-                    if server_content is not None:
-                        model_turn = server_content.model_turn
-                        if model_turn:
-                            for part in model_turn.parts:
-                                if part.inline_data:
-                                    audio_chunks.extend(part.inline_data.data)
-                        if server_content.turn_complete:
-                            break
+                    if server_content is None:
+                        continue
+
+                    model_turn = server_content.model_turn
+                    if model_turn:
+                        for part in model_turn.parts:
+                            if part.inline_data:
+                                audio_chunks.extend(part.inline_data.data)
+
+                    # Streamed transcript of the model's audio output
+                    output_transcription = server_content.output_transcription
+                    if output_transcription and output_transcription.text:
+                        transcript_chunks.append(output_transcription.text)
+
+                    if server_content.turn_complete:
+                        break
+
+            response_text = "".join(transcript_chunks).strip()
 
             if audio_chunks:
                 save_pcm_to_16khz_wav(audio_chunks, filepath)
                 df.at[i, "audio_path"] = str(filepath)
+                df.at[i, "response_text"] = response_text
                 success += 1
                 print(f"Saved: {filename}")
             else:
