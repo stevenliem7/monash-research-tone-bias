@@ -7,6 +7,9 @@ This script is used to generate a corpus of speech data from the Heet dataset us
 Usage:
     uv run python gemini_response_pipeline.py
     uv run python gemini_response_pipeline.py --input <input_path> --output-dir <output_dir> --dry-run --limit <limit>
+    
+    Note: You can re-run the script to after the first run to continue from the next file. The script will automatically skip files that 
+    already exist in the folderand continue from the next file. To restart, simply delete the output directory or create a new directory, and then run the script again.
 
 Arguments:
     --input: Path to the input CSV file containing the questions and emotions.
