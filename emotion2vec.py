@@ -4,7 +4,7 @@ Authors:
     Steven Liem (steven.liem@sydney.edu.au)
 
 Perform SER classification using emotion2vec_plus_large on all 8 corpora. Each cleaned corpus under corpora_cleaned/ is evaluated independently.
-No training or cross-validation: the pretrained emotion2vec_plus_large classifier is used off-the-shelf.
+No training or cross-validation: the pretrained emotion2vec_plus_large classifier is used off-the-shelf
 
 The full pipeline is as follows:
   1. Discover WAVs in each cleaned corpus directory
@@ -228,7 +228,7 @@ def save_cached(cache_path: Path, payload: dict) -> None:
         json.dump(payload, file)
 
 
-def normalize_emotion_label(label: object) -> str:
+def normalise_emotion_label(label: object) -> str:
     """Normalise FunASR labels (incl. bilingual ``开心/happy``) to English.
 
     Args:
@@ -260,13 +260,13 @@ def prediction_from_scores(score_map: dict[str, float], native_label: str | None
     """
     cleaned: dict[str, float] = {}
     for label, score in (score_map or {}).items():
-        key = normalize_emotion_label(label)
+        key = normalise_emotion_label(label)
         cleaned[key] = max(float(score), cleaned.get(key, float("-inf")))
     if cleaned:
         top_label = max(cleaned, key=cleaned.get)
         top_score = float(cleaned[top_label])
     else:
-        top_label = normalize_emotion_label(native_label or "unknown")
+        top_label = normalise_emotion_label(native_label or "unknown")
         top_score = 1.0
         cleaned = {top_label: top_score}
     valence = PRED_TO_VALENCE.get(top_label)
@@ -320,14 +320,14 @@ def parse_generate_result(result: object) -> tuple[str, float, dict[str, float]]
 
     score_map: dict[str, float] = {}
     for label, score in zip(labels, scores):
-        score_map[normalize_emotion_label(label)] = float(score)
+        score_map[normalise_emotion_label(label)] = float(score)
 
     if score_map:
         top_label = max(score_map, key=score_map.get)
         return top_label, score_map[top_label], score_map
 
     pred = item.get("preds") or item.get("text") or labels
-    top_label = normalize_emotion_label(pred)
+    top_label = normalise_emotion_label(pred)
     return top_label, 1.0, {top_label: 1.0}
 
 
@@ -548,7 +548,7 @@ def plot_confusion_matrices(corpus: str, metrics: dict) -> None:
     cm = np.asarray(metrics.get("confusion_matrix") or [])
     cm_norm = np.asarray(
         metrics.get("confusion_matrix_normalised")
-        or metrics.get("confusion_matrix_normalized")
+        or metrics.get("confusion_matrix_normalised")
         or []
     )
     if cm.size == 0:
