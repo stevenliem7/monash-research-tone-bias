@@ -1,4 +1,7 @@
 """
+Authors:
+    Steven Liem (steven.liem@sydney.edu.au)
+
 Build a per-corpus summary table from emotion2vec valence metrics (3-way).
 
 Reads results/emotion2vec/<corpus>/metrics.json for all 8 cleaned corpora and writes a CSV with the following columns:
@@ -58,38 +61,74 @@ COLUMNS = [
 
 
 def row_from_metrics(corpus: str, metrics: dict) -> dict:
+    """Convert a nested metrics dictionary into one summary-table row.
+
+    Args:
+        corpus: Corpus name written to the first column.
+        metrics: Aggregate and per-class emotion2vec metrics.
+
+    Returns:
+        dict: Flat summary row containing accuracy, precision, recall, and F1.
+    """
     pc = metrics.get("per_class") or {}
     pos = pc.get("positive") or {}
     neu = pc.get("neutral") or {}
     neg = pc.get("negative") or {}
 
-    def g(d: dict, key: str):
+    def get_metric(d: dict, key: str):
+        """Read one optional metric and convert it to a float.
+
+        Args:
+            d: Dictionary containing metric values.
+            key: Metric key to retrieve.
+
+        Returns:
+            float | None: Metric value, or None when the key is absent.
+        """
         v = d.get(key)
         return float(v) if v is not None else None
 
     return {
         "corpus": corpus,
-        "Acc": g(metrics, "accuracy"),
-        "Macro-F1": g(metrics, "macro_f1"),
-        "Bal. Acc": g(metrics, "balanced_accuracy"),
-        "Pos P": g(pos, "precision"),
-        "Pos R": g(pos, "recall"),
-        "Pos F1": g(pos, "f1"),
-        "Neu P": g(neu, "precision"),
-        "Neu R": g(neu, "recall"),
-        "Neu F1": g(neu, "f1"),
-        "Neg P": g(neg, "precision"),
-        "Neg R": g(neg, "recall"),
-        "Neg F1": g(neg, "f1"),
-        "F1": g(metrics, "weighted_f1"),
+        "Acc": get_metric(metrics, "accuracy"),
+        "Macro-F1": get_metric(metrics, "macro_f1"),
+        "Bal. Acc": get_metric(metrics, "balanced_accuracy"),
+        "Pos P": get_metric(pos, "precision"),
+        "Pos R": get_metric(pos, "recall"),
+        "Pos F1": get_metric(pos, "f1"),
+        "Neu P": get_metric(neu, "precision"),
+        "Neu R": get_metric(neu, "recall"),
+        "Neu F1": get_metric(neu, "f1"),
+        "Neg P": get_metric(neg, "precision"),
+        "Neg R": get_metric(neg, "recall"),
+        "Neg F1": get_metric(neg, "f1"),
+        "F1": get_metric(metrics, "weighted_f1"),
     }
 
 
 def _safe_div(num: float, den: float) -> float:
+    """Divide two values while treating a zero denominator as zero.
+
+    Args:
+        num: Numerator.
+        den: Denominator.
+
+    Returns:
+        float: Quotient, or 0.0 when the denominator is zero.
+    """
     return float(num / den) if den else 0.0
 
 
 def human_gt_row(heet_path: Path, predictions_path: Path) -> tuple[dict, int, int]:
+    """Evaluate emotion2vec against the human-labelled HEET valence rows.
+
+    Args:
+        heet_path: CSV containing audio paths and human ground-truth labels.
+        predictions_path: emotion2vec predictions CSV for the speech corpus.
+
+    Returns:
+        tuple[dict, int, int]: Summary row, labelled count, and evaluated count.
+    """
     heet = pd.read_csv(heet_path)
     predictions = pd.read_csv(predictions_path)
     heet["ground_truth_label"] = (
@@ -137,6 +176,14 @@ def human_gt_row(heet_path: Path, predictions_path: Path) -> tuple[dict, int, in
 
 
 def main() -> None:
+    """Build, print, and save the emotion2vec valence summary table.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--results-root",
