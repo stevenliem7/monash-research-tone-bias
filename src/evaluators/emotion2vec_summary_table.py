@@ -1,9 +1,7 @@
-#!/usr/bin/env python3
 """
 Build a per-corpus summary table from emotion2vec valence metrics (3-way).
 
-Reads results/emotion2vec/<corpus>/metrics.json for all 8 cleaned corpora and
-writes a CSV with:
+Reads results/emotion2vec/<corpus>/metrics.json for all 8 cleaned corpora and writes a CSV with the following columns:
 
   Acc, Macro-F1, Bal. Acc,
   Pos P, Pos R, Pos F1,
@@ -24,8 +22,11 @@ from pathlib import Path
 
 import pandas as pd
 
-WORKSPACE = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE = Path(__file__).resolve().parents[3]
 DEFAULT_RESULTS = WORKSPACE / "results" / "emotion2vec"
+DEFAULT_HEET = PROJECT_ROOT / "heet_dataset_clean.csv"
+VALENCE = ("positive", "neutral", "negative")
 
 CORPUS_DIRS = (
     "emovoice_cleaned",
@@ -84,6 +85,57 @@ def row_from_metrics(corpus: str, metrics: dict) -> dict:
     }
 
 
+def _safe_div(num: float, den: float) -> float:
+    return float(num / den) if den else 0.0
+
+
+def human_gt_row(heet_path: Path, predictions_path: Path) -> tuple[dict, int, int]:
+    heet = pd.read_csv(heet_path)
+    predictions = pd.read_csv(predictions_path)
+    heet["ground_truth_label"] = (
+        heet["ground_truth_label"].fillna("").astype(str).str.strip().str.lower()
+    )
+    labelled = heet[heet["ground_truth_label"].isin(VALENCE)].copy()
+    labelled["filename"] = labelled["audio_path"].fillna("").map(lambda p: Path(str(p)).name)
+    comparable = labelled.merge(predictions, on="filename", how="left")
+    comparable = comparable[comparable["pred_valence"].isin(VALENCE)]
+
+    cm = pd.crosstab(
+        comparable["ground_truth_label"],
+        comparable["pred_valence"],
+    ).reindex(index=list(VALENCE), columns=list(VALENCE), fill_value=0)
+
+    n = int(cm.values.sum())
+    per_class: dict[str, dict[str, float]] = {}
+    recalls = []
+    f1s = []
+    supports = []
+    for label in VALENCE:
+        tp = float(cm.loc[label, label])
+        support = float(cm.loc[label].sum())
+        pred_n = float(cm[label].sum())
+        precision = _safe_div(tp, pred_n)
+        recall = _safe_div(tp, support)
+        f1 = _safe_div(2 * precision * recall, precision + recall)
+        per_class[label] = {"precision": precision, "recall": recall, "f1": f1}
+        recalls.append(recall)
+        f1s.append(f1)
+        supports.append(support)
+
+    metrics = {
+        "accuracy": _safe_div(float(cm.values.diagonal().sum()), n),
+        "macro_f1": sum(f1s) / len(f1s),
+        "balanced_accuracy": sum(recalls) / len(recalls),
+        "weighted_f1": _safe_div(sum(f * s for f, s in zip(f1s, supports)), sum(supports)),
+        "per_class": per_class,
+    }
+    return (
+        row_from_metrics("our_speech_corpus_cleaned_human_GT", metrics),
+        len(labelled),
+        len(comparable),
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -97,6 +149,12 @@ def main() -> None:
         type=Path,
         default=None,
         help="Output CSV (default: <results-root>/summary_metrics_table.csv)",
+    )
+    parser.add_argument(
+        "--heet",
+        type=Path,
+        default=DEFAULT_HEET,
+        help="HEET CSV containing the human ground_truth_label values",
     )
     args = parser.parse_args()
 
@@ -112,6 +170,15 @@ def main() -> None:
         with path.open(encoding="utf-8") as f:
             metrics = json.load(f)
         rows.append(row_from_metrics(corpus, metrics))
+
+    predictions_path = results_root / "our_speech_corpus_cleaned" / "predictions.csv"
+    human_row, labelled_count, evaluated_count = human_gt_row(args.heet, predictions_path)
+    rows.append(human_row)
+    print(
+        "Human-GT row: "
+        f"{evaluated_count}/{labelled_count} labelled rows evaluated "
+        f"({labelled_count - evaluated_count} excluded/unmatched)"
+    )
 
     if not rows:
         raise FileNotFoundError(f"No metrics.json found under {results_root}")
