@@ -1,10 +1,12 @@
+#!/usr/bin/env python3
 """
 Authors:
     Steven Liem (steven.liem@sydney.edu.au)
 
 Build a per-corpus summary table from emotion2vec valence metrics (3-way).
 
-Reads results/emotion2vec/<corpus>/metrics.json for all 8 cleaned corpora and writes a CSV with the following columns:
+Reads results/emotion2vec/<corpus>/metrics.json for all 8 cleaned corpora and
+writes a CSV with:
 
   Acc, Macro-F1, Bal. Acc,
   Pos P, Pos R, Pos F1,
@@ -12,9 +14,13 @@ Reads results/emotion2vec/<corpus>/metrics.json for all 8 cleaned corpora and wr
   Neg P, Neg R, Neg F1,
   F1 (weighted)
 
+Our-speech rows are split:
+  *_prompted  — metrics vs filename/prompted valence (not human labels)
+  *_human_GT  — metrics vs HEET human labels (human-labelled ∩ emotion2vec-mappable, n=229)
+
 Usage:
-    uv run python emotion2vec_summary_table.py
-    uv run python emotion2vec_summary_table.py --results-root path/to/emotion2vec
+    uv run python src/evaluators/emotion2vec_summary_table.py
+    uv run python src/evaluators/emotion2vec_summary_table.py --results-root path/to/emotion2vec
 """
 
 from __future__ import annotations
@@ -23,13 +29,21 @@ import argparse
 import json
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import pandas as pd
+import seaborn as sns
+
+from human_gt_comparable import (
+    DEFAULT_E2V_PREDS,
+    DEFAULT_HEET,
+    build_comparable,
+    evaluate_human_gt,
+    print_coverage,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = Path(__file__).resolve().parents[3]
 DEFAULT_RESULTS = WORKSPACE / "results" / "emotion2vec"
-DEFAULT_HEET = PROJECT_ROOT / "heet_dataset_clean.csv"
-VALENCE = ("positive", "neutral", "negative")
 
 CORPUS_DIRS = (
     "emovoice_cleaned",
@@ -106,73 +120,39 @@ def row_from_metrics(corpus: str, metrics: dict) -> dict:
     }
 
 
-def _safe_div(num: float, den: float) -> float:
-    """Divide two values while treating a zero denominator as zero.
+def display_corpus_name(corpus: str) -> str:
+    """Rename our-speech prompted-valence metrics so they are not misread as human GT.
 
     Args:
-        num: Numerator.
-        den: Denominator.
+        corpus: Raw corpus directory name.
 
     Returns:
-        float: Quotient, or 0.0 when the denominator is zero.
+        str: Display name used in the summary CSV.
     """
-    return float(num / den) if den else 0.0
+    if corpus == "our_speech_corpus_cleaned":
+        return "our_speech_corpus_cleaned_prompted"
+    return corpus
 
 
-def human_gt_row(heet_path: Path, predictions_path: Path) -> tuple[dict, int, int]:
-    """Evaluate emotion2vec against the human-labelled HEET valence rows.
+def save_human_gt_confusion_matrix(cm: pd.DataFrame, output_path: Path) -> None:
+    """Save the human-GT valence confusion matrix as a PNG.
 
     Args:
-        heet_path: CSV containing audio paths and human ground-truth labels.
-        predictions_path: emotion2vec predictions CSV for the speech corpus.
+        cm: Count matrix with human GT as rows and emotion2vec predictions as columns.
+        output_path: Destination PNG path.
 
     Returns:
-        tuple[dict, int, int]: Summary row, labelled count, and evaluated count.
+        None
     """
-    heet = pd.read_csv(heet_path)
-    predictions = pd.read_csv(predictions_path)
-    heet["ground_truth_label"] = (
-        heet["ground_truth_label"].fillna("").astype(str).str.strip().str.lower()
-    )
-    labelled = heet[heet["ground_truth_label"].isin(VALENCE)].copy()
-    labelled["filename"] = labelled["audio_path"].fillna("").map(lambda p: Path(str(p)).name)
-    comparable = labelled.merge(predictions, on="filename", how="left")
-    comparable = comparable[comparable["pred_valence"].isin(VALENCE)]
-
-    cm = pd.crosstab(
-        comparable["ground_truth_label"],
-        comparable["pred_valence"],
-    ).reindex(index=list(VALENCE), columns=list(VALENCE), fill_value=0)
-
-    n = int(cm.values.sum())
-    per_class: dict[str, dict[str, float]] = {}
-    recalls = []
-    f1s = []
-    supports = []
-    for label in VALENCE:
-        tp = float(cm.loc[label, label])
-        support = float(cm.loc[label].sum())
-        pred_n = float(cm[label].sum())
-        precision = _safe_div(tp, pred_n)
-        recall = _safe_div(tp, support)
-        f1 = _safe_div(2 * precision * recall, precision + recall)
-        per_class[label] = {"precision": precision, "recall": recall, "f1": f1}
-        recalls.append(recall)
-        f1s.append(f1)
-        supports.append(support)
-
-    metrics = {
-        "accuracy": _safe_div(float(cm.values.diagonal().sum()), n),
-        "macro_f1": sum(f1s) / len(f1s),
-        "balanced_accuracy": sum(recalls) / len(recalls),
-        "weighted_f1": _safe_div(sum(f * s for f, s in zip(f1s, supports)), sum(supports)),
-        "per_class": per_class,
-    }
-    return (
-        row_from_metrics("our_speech_corpus_cleaned_human_GT", metrics),
-        len(labelled),
-        len(comparable),
-    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig, ax = plt.subplots(figsize=(6, 5))
+    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax)
+    ax.set_xlabel("Predicted valence (emotion2vec)")
+    ax.set_ylabel("Human ground-truth valence")
+    ax.set_title(f"Our speech corpus: human GT vs emotion2vec (n={int(cm.values.sum())})")
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=160)
+    plt.close(fig)
 
 
 def main() -> None:
@@ -203,10 +183,23 @@ def main() -> None:
         default=DEFAULT_HEET,
         help="HEET CSV containing the human ground_truth_label values",
     )
+    parser.add_argument(
+        "--e2v-predictions",
+        type=Path,
+        default=DEFAULT_E2V_PREDS,
+        help="emotion2vec predictions used to define the shared human-GT set",
+    )
     args = parser.parse_args()
 
     results_root = args.results_root
     out_path = args.output or (results_root / "summary_metrics_table.csv")
+    predictions_path = args.e2v_predictions
+    diagram_path = (
+        results_root
+        / "result_diagrams"
+        / "confusion_matrix_counts"
+        / "our_speech_corpus_cleaned_human_gt_confusion_counts.png"
+    )
 
     rows: list[dict] = []
     for corpus in CORPUS_DIRS:
@@ -216,15 +209,27 @@ def main() -> None:
             continue
         with path.open(encoding="utf-8") as f:
             metrics = json.load(f)
-        rows.append(row_from_metrics(corpus, metrics))
+        rows.append(row_from_metrics(display_corpus_name(corpus), metrics))
 
-    predictions_path = results_root / "our_speech_corpus_cleaned" / "predictions.csv"
-    human_row, labelled_count, evaluated_count = human_gt_row(args.heet, predictions_path)
-    rows.append(human_row)
+    comparable, coverage_stats = build_comparable(args.heet, predictions_path)
+    print_coverage(coverage_stats)
+
+    e2v_preds = pd.read_csv(predictions_path)
+    metrics, cm, coverage = evaluate_human_gt(
+        comparable,
+        e2v_preds,
+        "pred_valence",
+        instrument="emotion2vec",
+    )
+    save_human_gt_confusion_matrix(cm, diagram_path)
+    print(f"[emotion2vec] Confusion matrix diagram: {diagram_path}")
+    print(cm.to_string())
+    rows.append(row_from_metrics("our_speech_corpus_cleaned_human_GT", metrics))
     print(
-        "Human-GT row: "
-        f"{evaluated_count}/{labelled_count} labelled rows evaluated "
-        f"({labelled_count - evaluated_count} excluded/unmatched)"
+        f"[emotion2vec] Human-GT summary: "
+        f"n={coverage['n']} "
+        f"n_evaluated={coverage['n_evaluated']} "
+        f"neg_support={coverage['neg_support']}"
     )
 
     if not rows:
