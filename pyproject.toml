@@ -1,0 +1,14 @@
+[project]
+name = "monash-research-code"
+version = "0.1.0"
+description = "Monash research tools for speech emotion recognition"
+requires-python = ">=3.12"
+dependencies = [
+    "google-genai>=2.11.0",
+    "huggingface_hub>=0.26.0",
+    "numpy>=2.5.1",
+    "pandas>=2.0.0",
+    "pyarrow>=17.0.0",
+    "python-dotenv>=1.2.2",
+    "scipy>=1.18.0",
+]
