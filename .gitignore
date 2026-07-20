@@ -23,14 +23,3 @@ dist/
 # Environment / secrets
 .env
 .env.*
-!.env.example
-
-# Generated data artifacts
-manifests/
-*.parquet
-
-# OS/editor noise
-.DS_Store
-Thumbs.db
-.vscode/
-.idea/
