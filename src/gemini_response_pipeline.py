@@ -36,13 +36,45 @@ from google import genai
 from scipy import signal
 
 MODEL = "gemini-3.1-flash-live-preview"
-DEFAULT_INPUT = "/home/steve/tmp/Monash Research Code/monash-research-tone-bias/heet_dataset_clean.csv"
-DEFAULT_OUTPUT_DIR = "/home/steve/tmp/Monash Research Code/our_speech_corpus_test"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+WORKSPACE = Path(__file__).resolve().parents[2]
+DEFAULT_INPUT = PROJECT_ROOT / "heet_dataset_clean.csv"
+DEFAULT_OUTPUT_DIR = WORKSPACE / "our_speech_corpus_test"
 
-load_dotenv()
+load_dotenv(PROJECT_ROOT / ".env")
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     raise RuntimeError("GEMINI_API_KEY not found in environment variables")
+
+
+def _normalise_writable_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Force blank result columns to writable string dtype.
+
+    Args:
+        df: Manifest loaded from CSV (NaN often becomes float64).
+
+    Returns:
+        pd.DataFrame: Same frame with string audio_path / response_text.
+    """
+    for col in ("audio_path", "response_text"):
+        if col not in df.columns:
+            df[col] = ""
+        df[col] = df[col].fillna("").astype(str)
+        df.loc[df[col].isin(["nan", "None", "<NA>"]), col] = ""
+    return df
+
+
+def _has_response_text(value: object) -> bool:
+    """Return True when response_text is a non-empty transcript.
+
+    Args:
+        value: Cell value from the manifest.
+
+    Returns:
+        bool: Whether a usable transcript is present.
+    """
+    text = str(value or "").strip()
+    return bool(text) and text not in {"nan", "None", "<NA>"}
 
 
 def save_pcm_to_16khz_wav(pcm_bytes: bytes, filename: str | Path) -> None:
@@ -82,11 +114,11 @@ async def generate_corpus(
     Returns:
         None
     """
+    input_path = Path(input_path)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    df = pd.read_csv(input_path)
-
+    df = _normalise_writable_columns(pd.read_csv(input_path))
     work = df.head(limit) if limit is not None else df
 
     client = genai.Client(api_key=API_KEY)
@@ -96,14 +128,21 @@ async def generate_corpus(
     # See: https://ai.google.dev/gemini-api/docs/live-guide#audio-transcription
     config = {
         "response_modalities": ["AUDIO"],
-        "system_instruction": {"parts": [{"text": "You are Gemini, an AI personal assistant. Answer the user's question in **exactly one short sentence** in under 7 seconds."}]},
+        "output_audio_transcription": {},
+        "system_instruction": {
+            "parts": [
+                {
+                    "text": ("You are Gemini, an AI personal assistant. Answer the user's question in **exactly one short sentence** in under 7 seconds.")
+                }
+            ]
+        },
     }
 
     success = 0
     failed = 0
     skipped = 0
     for i, row in work.iterrows():
-        question_number = i + 1
+        question_number = int(i) + 1
         emotion = row["emotion_label"]
         bin_label = row["valence_label"]
         prompt = f"The user is currently speaking in a **{emotion}** tone: {row['Question']}"
@@ -112,7 +151,7 @@ async def generate_corpus(
         filename = f"{question_number}_{emotion}_{bin_label}.wav"
         filepath = output_dir / filename
 
-        if filepath.exists() and df.at[i, "response_text"]:
+        if filepath.exists() and _has_response_text(df.at[i, "response_text"]):
             df.at[i, "audio_path"] = str(filepath)
             skipped += 1
             continue
@@ -160,7 +199,7 @@ async def generate_corpus(
             print(f"Failed {filename}: {e}")
 
         # Write to CSV file every 25 speech files. This checkpoint mechanism is designed in case of failure during long running tasks.
-        if (success + failed) % checkpoint_every == 0:
+        if (success + failed) % checkpoint_every == 0 and (success + failed) > 0:
             df.to_csv(input_path, index=False)
             print(f"Checkpoint: wrote {input_path}")
 
