@@ -4,8 +4,7 @@ Authors:
 
 Evaluate Empathic-Insight-Voice (EIV) with 36 emotion heads at the full emotion level (not 3-way valence).
 
-Reuses existing per-corpus predictions.csv from
-results/empathic_insight_voice_all36/ (ground-truth emotion from cleaned
+Reuses existing per-corpus predictions.csv from results/empathic_insight_voice_all36/ (ground-truth emotion from cleaned
 filenames; prediction = top_emotion). Writes confusion-matrix PNGs under:
 
   results/empathic_insight_voice_all36/result_diagrams/confusion_matrix_all_emotions/
