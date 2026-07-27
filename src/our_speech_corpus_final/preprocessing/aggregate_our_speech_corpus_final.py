@@ -57,6 +57,14 @@ def aggregate(dest: Path = DEST, dry_run: bool = False) -> int:
 
 
 def main() -> None:
+    """CLI entrypoint: aggregate Corpus A/B WAVs into our_speech_corpus_final.
+
+    Args:
+        None. Command-line flags: ``--dest`` and ``--dry-run``.
+
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(
         description="Aggregate our_speech corpora into our_speech_corpus_final/"
     )

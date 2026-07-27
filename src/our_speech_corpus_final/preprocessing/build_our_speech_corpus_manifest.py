@@ -298,7 +298,15 @@ def build_manifests(
 
 
 def main() -> None:
-    """CLI entrypoint: build unified and split manifests, then print counts."""
+    """CLI entrypoint: build unified and split manifests, then print counts.
+
+    Args:
+        None. Command-line flags: ``--unified``, ``--split``, ``--train-fraction``,
+        and ``--seed``.
+
+    Returns:
+        None
+    """
     parser = argparse.ArgumentParser(description="Build our_speech_corpus manifests")
     parser.add_argument("--unified", type=Path, default=UNIFIED_MANIFEST_CSV)
     parser.add_argument("--split", type=Path, default=SPLIT_MANIFEST_CSV)
