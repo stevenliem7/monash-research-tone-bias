@@ -12,7 +12,21 @@ Usage:
     uv run python src/cleaners/clean_hybrid_negative_dataset.py --seed 42
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import json
@@ -20,11 +34,12 @@ from pathlib import Path
 
 import pandas as pd
 
-WORKSPACE = Path(__file__).resolve().parents[3]
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+from config import HEET_NEW_NEGATIVE_CSV, HYBRID_NEGATIVE_JSONL, bootstrap_imports
 
-DEFAULT_INPUT = WORKSPACE / "hybrid_negative_voice_assistant_2000.jsonl"
-DEFAULT_OUTPUT = PROJECT_ROOT / "heet_dataset_new_negative_clean.csv"
+bootstrap_imports(__file__)
+
+DEFAULT_INPUT = HYBRID_NEGATIVE_JSONL
+DEFAULT_OUTPUT = HEET_NEW_NEGATIVE_CSV
 
 EMOTIONS = ("angry", "sad", "disgust", "fearful")
 PER_EMOTION = 500

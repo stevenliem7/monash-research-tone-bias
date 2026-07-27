@@ -18,13 +18,30 @@ References:
     None
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import random
 import shutil
 from pathlib import Path
 
+from config import TESS_HUMAN_CLEANED_DIR, TESS_HUMAN_RAW_DIR, bootstrap_imports
 
-SOURCE = Path("/home/steve/tmp/Monash Research Code/corpora/TESS/data/tess/tess")
-OUTPUT = Path("/home/steve/tmp/Monash Research Code/corpora_cleaned/tess_human_cleaned")
+bootstrap_imports(__file__)
+
+SOURCE = TESS_HUMAN_RAW_DIR
+OUTPUT = TESS_HUMAN_CLEANED_DIR
 SAMPLE_COUNTS = {
     "happy": (400, "positive"),
     "neutral": (400, "neutral"),

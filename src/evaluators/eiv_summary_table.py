@@ -22,7 +22,21 @@ Usage:
     uv run python src/evaluators/eiv_summary_table.py --results-root path/to/empathic_insight_voice_all36
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import json
@@ -39,10 +53,11 @@ from human_gt_comparable import (
     evaluate_human_gt,
     print_coverage,
 )
+from config import RESULTS_EIV, bootstrap_imports
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WORKSPACE = Path(__file__).resolve().parents[3]
-DEFAULT_RESULTS = WORKSPACE / "results" / "empathic_insight_voice_all36"
+bootstrap_imports(__file__)
+
+DEFAULT_RESULTS = RESULTS_EIV
 
 METHODS = {
     "valence_head": "pred_valence_head",

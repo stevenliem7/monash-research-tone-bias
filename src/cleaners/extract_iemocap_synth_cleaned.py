@@ -18,16 +18,31 @@ References:
     None
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import json
 import random
 import shutil
 from pathlib import Path
 
+from config import IEMOCAP_SYN_CLEANED_DIR, IEMOCAP_SYN_RAW_DIR, bootstrap_imports
 
-SOURCE = Path("/home/steve/tmp/Monash Research Code/corpora/IEMOCAP_SYN/cosyvoice2")
-OUTPUT = Path(
-    "/home/steve/tmp/Monash Research Code/corpora_cleaned/iemocap_synth_cleaned"
-)
+bootstrap_imports(__file__)
+
+SOURCE = IEMOCAP_SYN_RAW_DIR
+OUTPUT = IEMOCAP_SYN_CLEANED_DIR
 SAMPLE_COUNTS = {
     "happy": (400, "positive"),
     "neutral": (400, "neutral"),

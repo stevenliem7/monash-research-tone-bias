@@ -16,13 +16,31 @@ References:
     https://huggingface.co/datasets/AbstractTTS/IEMOCAP
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import argparse
 from pathlib import Path
 
 import pandas as pd
 
+from config import MANIFEST_IEMOCAP_HF_CSV, bootstrap_imports
+
+bootstrap_imports(__file__)
+
 REPO_ID = "AbstractTTS/IEMOCAP"
-OUT = Path("manifests/manifest_iemocap_hf.csv")
+OUT = MANIFEST_IEMOCAP_HF_CSV
 DRY_RUN_ROWS = 200
 SPLIT_NAMES = ("train", "validation", "test")
 

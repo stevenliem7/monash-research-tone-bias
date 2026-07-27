@@ -22,7 +22,21 @@ References:
     None
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import random
@@ -30,7 +44,9 @@ from pathlib import Path
 
 import pandas as pd
 
-# EDIT the TARGET_COUNTS map to change the number of rows to extract from Heet's dataset for each emotion.
+from config import HEET_CLEAN_CSV, HEET_RAW_CSV, bootstrap_imports
+
+bootstrap_imports(__file__)
 
 # For our current research, we are aiming for 400 of each valence bin to match it with other corpora.
 # 400 positive (happy) + 400 neutral + 100 each * 4 negative = 1,200
@@ -185,8 +201,8 @@ def attach_ground_truth_label(
 
 
 def main(
-    input_path: str | Path = "heet_dataset.csv",
-    output_path: str | Path = "heet_dataset_clean.csv",
+    input_path: str | Path = HEET_RAW_CSV,
+    output_path: str | Path = HEET_CLEAN_CSV,
     seed: int = 42,
 ) -> pd.DataFrame:
     """Full cleaning pipeline.
@@ -230,8 +246,8 @@ def main(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input", default="heet_dataset.csv")
-    parser.add_argument("--output", default="heet_dataset_clean.csv")
+    parser.add_argument("--input", default=HEET_RAW_CSV)
+    parser.add_argument("--output", default=HEET_CLEAN_CSV)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 

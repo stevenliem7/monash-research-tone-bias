@@ -23,7 +23,21 @@ References:
     None
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import json
@@ -33,11 +47,11 @@ from pathlib import Path
 
 import pandas as pd
 
-_ROOT = Path(__file__).resolve().parent
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
+from config import bootstrap_imports, extend_our_speech_corpus_paths
 
-from pipeline_config import (
+bootstrap_imports(__file__)
+extend_our_speech_corpus_paths()
+from config import (
     MANIFEST_COLUMNS,
     QC_REPORT_JSON,
     SPLIT_COLUMN,

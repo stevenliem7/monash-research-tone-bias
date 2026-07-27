@@ -13,6 +13,20 @@ References:
     https://huggingface.co/datasets/SALT-Research/DeepDialogue-xtts
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import csv
 import os
 import random
@@ -20,15 +34,17 @@ import shutil
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from config import (
+    DEEPDIALOGUE_XTTS_CLEANED_DIR,
+    MANIFEST_DEEPDIALOGUE_HF_CSV,
+    bootstrap_imports,
+)
+
+bootstrap_imports(__file__)
 
 REPO = "SALT-Research/DeepDialogue-xtts"
-MANIFEST = Path(
-    "/home/steve/tmp/Monash Research Code/"
-    "monash-research-tone-bias/manifests/manifest_deepdialogue_hf.csv"
-)
-OUTPUT = Path(
-    "/home/steve/tmp/Monash Research Code/corpora_cleaned/deepdialogue_xtts_cleaned"
-)
+MANIFEST = MANIFEST_DEEPDIALOGUE_HF_CSV
+OUTPUT = DEEPDIALOGUE_XTTS_CLEANED_DIR
 SAMPLE_COUNTS = {
     "happy": (400, "positive"),
     "neutral": (400, "neutral"),

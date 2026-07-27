@@ -23,6 +23,20 @@ References:
 
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import argparse
 import asyncio
 import os
@@ -35,13 +49,20 @@ from dotenv import load_dotenv
 from google import genai
 from scipy import signal
 
-MODEL = "gemini-3.1-flash-live-preview"
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-WORKSPACE = Path(__file__).resolve().parents[2]
-DEFAULT_INPUT = PROJECT_ROOT / "heet_dataset_clean.csv"
-DEFAULT_OUTPUT_DIR = WORKSPACE / "our_speech_corpus_test"
+from config import (
+    DOTENV_PATH,
+    GEMINI_DEFAULT_OUTPUT_DIR,
+    HEET_CLEAN_CSV,
+    bootstrap_imports,
+)
 
-load_dotenv(PROJECT_ROOT / ".env")
+bootstrap_imports(__file__)
+
+MODEL = "gemini-3.1-flash-live-preview"
+DEFAULT_INPUT = HEET_CLEAN_CSV
+DEFAULT_OUTPUT_DIR = GEMINI_DEFAULT_OUTPUT_DIR
+
+load_dotenv(DOTENV_PATH)
 API_KEY = os.getenv("GEMINI_API_KEY")
 if not API_KEY:
     raise RuntimeError("GEMINI_API_KEY not found in environment variables")

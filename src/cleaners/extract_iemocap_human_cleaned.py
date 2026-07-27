@@ -16,20 +16,37 @@ References:
     https://huggingface.co/datasets/ak0255/Synthesis_SER
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import csv
 import random
 import shutil
 from pathlib import Path
 
+from config import (
+    IEMOCAP_HUMAN_CLEANED_DIR,
+    IEMOCAP_HUMAN_WAVS_DIR,
+    MANIFEST_IEMOCAP_HF_CSV,
+    bootstrap_imports,
+)
 
-WAVS = Path("/home/steve/tmp/Monash Research Code/corpora/IEMOCAP/wavs")
-MANIFEST = Path(
-    "/home/steve/tmp/Monash Research Code/"
-    "monash-research-tone-bias/manifests/manifest_iemocap_hf.csv"
-)
-OUTPUT = Path(
-    "/home/steve/tmp/Monash Research Code/corpora_cleaned/iemocap_human_cleaned"
-)
+bootstrap_imports(__file__)
+
+WAVS = IEMOCAP_HUMAN_WAVS_DIR
+MANIFEST = MANIFEST_IEMOCAP_HF_CSV
+OUTPUT = IEMOCAP_HUMAN_CLEANED_DIR
 
 # Standard IEMOCAP 6-class; 400/400/400 valence bins.
 SAMPLE_COUNTS = {

@@ -37,7 +37,21 @@ Refs:
     https://huggingface.co/mkrausio/EmoWhisper-AnS-Small-v0.1
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import json
@@ -65,23 +79,31 @@ from transformers import WhisperForConditionalGeneration, WhisperProcessor
 # ---------------------------------------------------------------------------
 _ON_KAGGLE = Path("/kaggle/working").is_dir()
 _ON_COLAB = (not _ON_KAGGLE) and Path("/content").is_dir()
-_LOCAL_ROOT = Path(__file__).resolve().parents[1]
 
 if _ON_KAGGLE:
     CORPORA_ROOT = Path("/kaggle/input/corpora-cleaned")
     RESULTS_ROOT = Path("/kaggle/working/eiv_all36_results")
     MLP_DIR = Path("/kaggle/working/empathic_insight_voice_small_models")
+    DEFAULT_HEET = Path("/kaggle/input/heet_dataset_clean.csv")
 elif _ON_COLAB:
     CORPORA_ROOT = Path("/content/corpora_cleaned")
     RESULTS_ROOT = Path("/content/eiv_all36_results")
     MLP_DIR = Path("/content/empathic_insight_voice_small_models")
+    DEFAULT_HEET = Path("/content/heet_dataset_clean.csv")
 else:
-    CORPORA_ROOT = _LOCAL_ROOT / "corpora_cleaned"
-    RESULTS_ROOT = _LOCAL_ROOT / "results" / "empathic_insight_voice_all36"
-    MLP_DIR = _LOCAL_ROOT / "empathic_insight_voice_small_models"
+    from config import (
+        CORPORA_CLEANED_ROOT,
+        EMPATHIC_INSIGHT_VOICE_MLP_DIR,
+        HEET_CLEAN_CSV,
+        RESULTS_EIV,
+        bootstrap_imports,
+    )
 
-# Human valence labels (HEET); only our_speech_corpus_cleaned uses this.
-DEFAULT_HEET = Path(__file__).resolve().parent / "heet_dataset_clean.csv"
+    bootstrap_imports(__file__)
+    CORPORA_ROOT = CORPORA_CLEANED_ROOT
+    RESULTS_ROOT = RESULTS_EIV
+    MLP_DIR = EMPATHIC_INSIGHT_VOICE_MLP_DIR
+    DEFAULT_HEET = HEET_CLEAN_CSV
 
 SAMPLING_RATE = 16000
 MAX_AUDIO_SECONDS = 30.0

@@ -20,7 +20,21 @@ References:
     https://huggingface.co/emotion2vec/emotion2vec_plus_large
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import json
@@ -38,13 +52,20 @@ from sklearn.metrics import (
     recall_score,
 )
 
-WORKSPACE = Path(__file__).resolve().parents[3]
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RESULTS_ROOT = WORKSPACE / "results" / "emotion2vec"
+from config import (
+    HEET_CLEAN_CSV,
+    RESULTS_EMOTION2VEC,
+    VALENCE_CLASSES,
+    bootstrap_imports,
+)
+
+bootstrap_imports(__file__)
+
+RESULTS_ROOT = RESULTS_EMOTION2VEC
 DIAGRAMS_ROOT = RESULTS_ROOT / "result_diagrams" / "confusion_matrix_all_emotions"
 METRICS_ROOT = RESULTS_ROOT / "all_emotions"
-DEFAULT_HEET = PROJECT_ROOT / "heet_dataset_clean.csv"
-VALENCE = ("positive", "neutral", "negative")
+DEFAULT_HEET = HEET_CLEAN_CSV
+VALENCE = VALENCE_CLASSES
 
 # Spelling / corpus aliases -> emotion2vec-style names (same emotion only).
 EMOTION_ALIASES = {

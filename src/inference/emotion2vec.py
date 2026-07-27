@@ -27,7 +27,21 @@ References:
     https://huggingface.co/emotion2vec/emotion2vec_plus_large
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import json
@@ -49,15 +63,22 @@ from sklearn.metrics import (
     precision_recall_fscore_support,
 )
 
-WORKSPACE = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parent
-CORPORA_ROOT = WORKSPACE / "corpora_cleaned"  # Directory of the cleaned corpora
-RESULTS_ROOT = WORKSPACE / "results" / "emotion2vec"  # Directory to save the results
-CACHE_ROOT = RESULTS_ROOT / "cache"  # Directory to save the cached predictions
-DIAGRAMS_ROOT = RESULTS_ROOT / "result_diagrams"  # Directory to save the confusion matrices
+from config import (
+    CORPORA_CLEANED_ROOT,
+    EMOTION2VEC_MODEL_ID,
+    RESULTS_EMOTION2VEC,
+    VALENCE_CLASSES,
+    bootstrap_imports,
+)
 
-MODEL_ID = "iic/emotion2vec_plus_large"
-VALENCE_CLASSES = ("positive", "neutral", "negative")
+bootstrap_imports(__file__)
+
+CORPORA_ROOT = CORPORA_CLEANED_ROOT
+RESULTS_ROOT = RESULTS_EMOTION2VEC
+CACHE_ROOT = RESULTS_ROOT / "cache"
+DIAGRAMS_ROOT = RESULTS_ROOT / "result_diagrams"
+
+MODEL_ID = EMOTION2VEC_MODEL_ID
 EXCLUDED_PREDICTIONS = frozenset({"other", "surprised", "unknown"})
 
 PRED_TO_VALENCE = {

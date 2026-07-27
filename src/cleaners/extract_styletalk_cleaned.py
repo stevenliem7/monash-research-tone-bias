@@ -18,14 +18,31 @@ References:
     https://github.com/DanielLin94144/StyleTalk
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import csv
 import random
 import shutil
 from pathlib import Path
 
+from config import STYLETALK_CLEANED_DIR, STYLETALK_RAW_DIR, bootstrap_imports
 
-SOURCE = Path("/home/steve/tmp/Monash Research Code/corpora/StyleTalk")
-OUTPUT = Path("/home/steve/tmp/Monash Research Code/corpora_cleaned/styletalk_cleaned")
+bootstrap_imports(__file__)
+
+SOURCE = STYLETALK_RAW_DIR
+OUTPUT = STYLETALK_CLEANED_DIR
 CSV_FILES = ("train (1).csv", "eval.csv")
 SAMPLE_COUNTS = {
     "cheerful": (400, "positive"),

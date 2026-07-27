@@ -17,15 +17,33 @@ References:
     https://huggingface.co/datasets/SALT-Research/DeepDialogue-xtts
 """
 
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
+
+
 import argparse
 from pathlib import Path
 
 import pandas as pd
 
+from config import MANIFEST_DEEPDIALOGUE_HF_CSV, bootstrap_imports
+
+bootstrap_imports(__file__)
+
 REPO_ID = "SALT-Research/DeepDialogue-xtts"
 CONFIG = "default"
 SPLIT = "train"
-OUT = Path("manifests/manifest_deepdialogue_hf.csv") # Path to the output manifest file.
+OUT = MANIFEST_DEEPDIALOGUE_HF_CSV
 DRY_RUN_ROWS = 200 # Number of rows to extract for dry run.
 
 KEEP_COLUMNS = (

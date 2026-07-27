@@ -12,7 +12,21 @@ Usage:
         --predictions ../results/emotion2vec/our_speech_corpus_cleaned/predictions.csv
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 from pathlib import Path
@@ -21,16 +35,20 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WORKSPACE = Path(__file__).resolve().parents[3]
-DEFAULT_HEET = PROJECT_ROOT / "heet_dataset_clean.csv"
+from config import (
+    HEET_CLEAN_CSV,
+    RESULTS_EMOTION2VEC,
+    bootstrap_imports,
+)
+
+bootstrap_imports(__file__)
+
+DEFAULT_HEET = HEET_CLEAN_CSV
 DEFAULT_PREDICTIONS = (
-    WORKSPACE / "results" / "emotion2vec" / "our_speech_corpus_cleaned" / "predictions.csv"
+    RESULTS_EMOTION2VEC / "our_speech_corpus_cleaned" / "predictions.csv"
 )
 DEFAULT_DIAGRAM = (
-    WORKSPACE
-    / "results"
-    / "emotion2vec"
+    RESULTS_EMOTION2VEC
     / "result_diagrams"
     / "confusion_matrix_counts"
     / "our_speech_corpus_cleaned_human_gt_confusion_counts.png"

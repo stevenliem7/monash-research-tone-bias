@@ -10,18 +10,40 @@ emits a valence. The shared set is:
 Every instrument must be scored on this same filename set (n=229) and counting.
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 from pathlib import Path
 
 import pandas as pd
 
-VALENCE = ("positive", "neutral", "negative")
-WORKSPACE = Path(__file__).resolve().parents[3]
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_HEET = PROJECT_ROOT / "heet_dataset_clean.csv"
+from config import (
+    HEET_CLEAN_CSV,
+    RESULTS_EMOTION2VEC,
+    VALENCE_CLASSES,
+    bootstrap_imports,
+)
+
+bootstrap_imports(__file__)
+
+VALENCE = VALENCE_CLASSES
+
+DEFAULT_HEET = HEET_CLEAN_CSV
 DEFAULT_E2V_PREDS = (
-    WORKSPACE / "results" / "emotion2vec" / "our_speech_corpus_cleaned" / "predictions.csv"
+    RESULTS_EMOTION2VEC / "our_speech_corpus_cleaned" / "predictions.csv"
 )
 
 

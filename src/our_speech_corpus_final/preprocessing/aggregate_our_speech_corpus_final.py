@@ -11,14 +11,31 @@ Usage:
     uv run python src/our_speech_corpus_final/aggregate_our_speech_corpus_final.py --dry-run
 """
 
+
 from __future__ import annotations
+
+import importlib.util
+from pathlib import Path
+
+for _p in Path(__file__).resolve().parents:
+    _loader = _p / "load_config.py"
+    if _loader.is_file():
+        _spec = importlib.util.spec_from_file_location("load_config", _loader)
+        _mod = importlib.util.module_from_spec(_spec)
+        _spec.loader.exec_module(_mod)
+        _mod.bootstrap(__file__)
+        break
+
 
 import argparse
 import shutil
 from pathlib import Path
 
-WORKSPACE = Path(__file__).resolve().parents[3]
-CORPORA_ROOT = WORKSPACE / "corpora_cleaned"
+from config import CORPORA_CLEANED_ROOT, bootstrap_imports
+
+bootstrap_imports(__file__)
+
+CORPORA_ROOT = CORPORA_CLEANED_ROOT
 
 SOURCES = (
     ("A", CORPORA_ROOT / "our_speech_corpus_cleaned"),
