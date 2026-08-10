@@ -40,6 +40,7 @@ LABEL_PASS_AGREEMENT_JSON = DATA_ROOT / "label_pass_agreement.json"
 DATA_EMOTION2VEC = DATA_ROOT / "our_speech_corpus_emotion2vec"
 DATA_WAVLM = DATA_ROOT / "our_speech_corpus_wavlm"
 DATA_WAV2VEC2 = DATA_ROOT / "our_speech_corpus_wav2vec2"
+DATA_TEXT = DATA_ROOT / "our_speech_corpus_text"
 
 # Legacy alias (was data/our_speech_corpus/)
 DATA_DIR = DATA_ROOT
@@ -60,10 +61,32 @@ WAVLM_POOL_EMBEDDINGS_NPZ = DATA_WAVLM / "our_speech_corpus_microsoft_wavlm-larg
 WAVLM_CV_RESULTS_JSON = (
     DATA_WAVLM / "reports" / "our_speech_corpus_valence_head_cv_wavlm_new_label.json"
 )
+WAVLM_CV_GROUP_QUESTION_JSON = (
+    DATA_WAVLM / "reports" / "valence_head_cv_wavlm_group_question.json"
+)
 WAV2VEC2_EMBEDDINGS_NPZ = DATA_WAV2VEC2 / "our_speech_corpus_facebook_wav2vec2-large-robust.npz"
 WAV2VEC2_CV_RESULTS_JSON = (
     DATA_WAV2VEC2 / "reports" / "our_speech_corpus_valence_head_cv_new_labels.json"
 )
+
+# Text-only (transcript) valence baselines
+TEXT_CV_RESULTS_JSON = (
+    DATA_TEXT / "reports" / "valence_head_cv_text_group_question.json"
+)
+TEXT_REPORTS_DIR = DATA_TEXT / "reports"
+MINILM_EMBEDDINGS_NPZ = DATA_TEXT / "minilm_embeddings.npz"
+MINILM_CV_GROUP_QUESTION_JSON = (
+    TEXT_REPORTS_DIR / "valence_head_cv_minilm_group_question.json"
+)
+DISTILBERT_EMBEDDINGS_NPZ = DATA_TEXT / "distilbert_embeddings.npz"
+DISTILBERT_CV_GROUP_QUESTION_JSON = (
+    TEXT_REPORTS_DIR / "valence_head_cv_distilbert_group_question.json"
+)
+DISTILBERT_WEAK_LABEL_AGREEMENT_JSON = (
+    TEXT_REPORTS_DIR / "distilbert_weak_label_agreement.json"
+)
+DISTILBERT_SST2_MODEL_ID = "distilbert-base-uncased-finetuned-sst-2-english"
+MINILM_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Backward-compatible names from pipeline_config
 EMBEDDINGS_NPZ = EMOTION2VEC_EMBEDDINGS_NPZ
