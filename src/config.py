@@ -82,6 +82,10 @@ DISTILBERT_EMBEDDINGS_NPZ = DATA_TEXT / "distilbert_embeddings.npz"
 DISTILBERT_CV_GROUP_QUESTION_JSON = (
     TEXT_REPORTS_DIR / "valence_head_cv_distilbert_group_question.json"
 )
+ROBERTA_EMBEDDINGS_NPZ = DATA_TEXT / "roberta_embeddings.npz"
+ROBERTA_CV_GROUP_QUESTION_JSON = (
+    TEXT_REPORTS_DIR / "valence_head_cv_roberta_group_question.json"
+)
 DISTILBERT_WEAK_LABEL_AGREEMENT_JSON = (
     TEXT_REPORTS_DIR / "distilbert_weak_label_agreement.json"
 )
