@@ -85,7 +85,14 @@ DISTILBERT_CV_GROUP_QUESTION_JSON = (
 DISTILBERT_WEAK_LABEL_AGREEMENT_JSON = (
     TEXT_REPORTS_DIR / "distilbert_weak_label_agreement.json"
 )
+ROBERTA_WEAK_LABEL_AGREEMENT_JSON = (
+    TEXT_REPORTS_DIR / "roberta_weak_label_agreement.json"
+)
 DISTILBERT_SST2_MODEL_ID = "distilbert-base-uncased-finetuned-sst-2-english"
+# Native 3-class (neg/neu/pos) sentiment classifier for weak-label agreement
+TWITTER_ROBERTA_SENTIMENT_MODEL_ID = (
+    "cardiffnlp/twitter-roberta-base-sentiment-latest"
+)
 MINILM_MODEL_ID = "sentence-transformers/all-MiniLM-L6-v2"
 
 # Backward-compatible names from pipeline_config
