@@ -39,6 +39,7 @@ LABEL_PASS_AGREEMENT_JSON = DATA_ROOT / "label_pass_agreement.json"
 # Per-backbone artifact directories
 DATA_EMOTION2VEC = DATA_ROOT / "our_speech_corpus_emotion2vec"
 DATA_WAVLM = DATA_ROOT / "our_speech_corpus_wavlm"
+DATA_WAVLM_FINETUNED = DATA_ROOT / "our_speech_corpus_wavlm_finetuned"
 DATA_WAV2VEC2 = DATA_ROOT / "our_speech_corpus_wav2vec2"
 DATA_TEXT = DATA_ROOT / "our_speech_corpus_text"
 
@@ -64,6 +65,16 @@ WAVLM_CV_RESULTS_JSON = (
 WAVLM_CV_GROUP_QUESTION_JSON = (
     DATA_WAVLM / "reports" / "valence_head_cv_wavlm_group_question.json"
 )
+WAVLM_FINETUNED_ROOT = DATA_WAVLM_FINETUNED
+WAVLM_FINETUNED_CACHE_DIR = DATA_WAVLM_FINETUNED / "cache"
+WAVLM_FINETUNED_CHECKPOINT_DIR = DATA_WAVLM_FINETUNED / "checkpoints"
+WAVLM_FINETUNED_REPORTS_DIR = DATA_WAVLM_FINETUNED / "reports"
+WAVLM_FINETUNED_NESTED_CV_JSON = WAVLM_FINETUNED_REPORTS_DIR / "nested_cv.json"
+WAVLM_FINETUNED_PAIRED_JSON = WAVLM_FINETUNED_REPORTS_DIR / "paired_inference.json"
+WAVLM_FINETUNED_LEAKAGE_JSON = WAVLM_FINETUNED_REPORTS_DIR / "leakage_check.json"
+WAVLM_FINETUNED_OOF_CSV = WAVLM_FINETUNED_REPORTS_DIR / "oof_predictions.csv"
+WAVLM_FINETUNED_FINAL_PT = WAVLM_FINETUNED_CHECKPOINT_DIR / "final.pt"
+WAVLM_FINETUNED_RUN_STATE_JSON = DATA_WAVLM_FINETUNED / "run_state.json"
 WAV2VEC2_EMBEDDINGS_NPZ = DATA_WAV2VEC2 / "our_speech_corpus_facebook_wav2vec2-large-robust.npz"
 WAV2VEC2_CV_RESULTS_JSON = (
     DATA_WAV2VEC2 / "reports" / "our_speech_corpus_valence_head_cv_new_labels.json"
