@@ -21,19 +21,19 @@ Kaggle notebook (GPU):
       --output-dir /kaggle/working/ssl_wav2vec2 \
       --run-cv
 
-    # WavLM-large: extract + CV
+    # WavLM-large: extract + CV (question-grouped, matches headline protocol)
     !python /kaggle/input/.../run_ssl_backbone_kaggle.py \
       --model wavlm-large \
       --corpora-root /kaggle/input/.../our_speech_corpus_final \
       --manifest /kaggle/input/.../our_speech_corpus_manifest_split_80_20.csv \
       --output-dir /kaggle/working/ssl_wavlm \
-      --run-cv
+      --run-cv --group-by question
 
 Smoke test:
 
     !python .../run_ssl_backbone_kaggle.py --model wav2vec2-large-robust \
       --corpora-root ... --manifest ... --output-dir /kaggle/working/smoke \
-      --limit 20 --run-cv --folds 2 --repeats 1
+      --limit 20 --run-cv --group-by question --folds 2 --repeats 1
 
 Note: use a single backslash for line breaks in notebook cells (not \\).
 
@@ -93,7 +93,8 @@ def main() -> None:
     Args:
         None. Command-line flags: ``--model``, ``--corpora-root``, ``--manifest``,
         ``--output-dir``, ``--device``, ``--limit``, ``--splits``, ``--run-cv``,
-        ``--folds``, ``--repeats``, ``--seed``, and ``--acoustic-features``.
+        ``--folds``, ``--repeats``, ``--seed``, ``--acoustic-features``,
+        ``--group-by``, and ``--ungrouped``.
 
     Returns:
         None
@@ -146,6 +147,20 @@ def main() -> None:
         action="store_true",
         help="Pass through to CV script (trivial acoustics baseline)",
     )
+    parser.add_argument(
+        "--group-by",
+        choices=("question", "response_text"),
+        default="question",
+        help=(
+            "StratifiedGroupKFold column for --run-cv "
+            "(default: question, matches WavLM headline / text baselines)"
+        ),
+    )
+    parser.add_argument(
+        "--ungrouped",
+        action="store_true",
+        help="Use RepeatedStratifiedKFold instead of --group-by (legacy bake-off)",
+    )
     args = parser.parse_args()
 
     if not args.corpora_root.is_dir():
@@ -187,7 +202,9 @@ def main() -> None:
     # Import here so extract-only runs don't require the CV module path quirks.
     from train_valence_head_cv import evaluate_all
 
-    cv_out = args.output_dir / f"our_speech_corpus_valence_head_cv_{stem}.json"
+    group_by = None if args.ungrouped else args.group_by
+    suffix = "ungrouped" if group_by is None else f"group_{group_by}"
+    cv_out = args.output_dir / f"our_speech_corpus_valence_head_cv_{stem}_{suffix}.json"
     evaluate_all(
         embeddings_path=npz_path,
         manifest_path=remapped_csv,
@@ -196,8 +213,9 @@ def main() -> None:
         repeats=args.repeats,
         seed=args.seed,
         acoustic=args.acoustic_features,
+        group_by=group_by,
     )
-    print(f"[kaggle] cv results: {cv_out}")
+    print(f"[kaggle] cv results: {cv_out}  (group_by={group_by})")
 
 
 if __name__ == "__main__":

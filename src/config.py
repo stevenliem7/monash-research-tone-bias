@@ -55,6 +55,9 @@ EMOTION2VEC_HEAD_RESULTS_JSON = (
 EMOTION2VEC_CV_RESULTS_JSON = (
     DATA_EMOTION2VEC / "reports" / "our_speech_corpus_valence_head_cv_new_labels.json"
 )
+EMOTION2VEC_CV_GROUP_QUESTION_JSON = (
+    DATA_EMOTION2VEC / "reports" / "valence_head_cv_emotion2vec_group_question.json"
+)
 
 # WavLM / wav2vec2 artifacts
 WAVLM_EMBEDDINGS_NPZ = DATA_WAVLM / "our_speech_corpus_microsoft_wavlm-large.npz"
