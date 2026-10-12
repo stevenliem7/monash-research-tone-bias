@@ -39,7 +39,9 @@ from fine_tuning.model import (
     ValenceHead,
     _encoder_layer_accepts_index,
     call_wavlm_encoder_layer,
+    freeze_cnn_train_all_transformers,
     freeze_except_suffix,
+    is_full_ft_trainable,
     mask_aware_mean_pool,
     seed_everything,
 )
@@ -97,7 +99,124 @@ class FakeLayer(torch.nn.Module):
 class FakeWavLM(torch.nn.Module):
     def __init__(self, n_layers: int = 4, hidden: int = 16):
         super().__init__()
+        self.feature_extractor = torch.nn.Linear(hidden, hidden)
+        self.feature_projection = torch.nn.Linear(hidden, hidden)
         self.encoder = FakeEncoder(n_layers, hidden)
+
+
+class TestFullFtFreeze(unittest.TestCase):
+    def test_cnn_frozen_transformers_live(self):
+        m = FakeWavLM(n_layers=4, hidden=8)
+        names = freeze_cnn_train_all_transformers(m)
+        self.assertTrue(any(n.startswith("encoder.layers.") for n in names))
+        for p in m.feature_extractor.parameters():
+            self.assertFalse(p.requires_grad)
+        for p in m.feature_projection.parameters():
+            self.assertFalse(p.requires_grad)
+        for p in m.encoder.layers.parameters():
+            self.assertTrue(p.requires_grad)
+        for p in m.encoder.layer_norm.parameters():
+            self.assertTrue(p.requires_grad)
+
+    def test_full_classifier_uniform_primary(self):
+        from fine_tuning.model import FullWavLMClassifier
+
+        m = FakeWavLM(n_layers=4, hidden=8)
+        clf = FullWavLMClassifier(m, pool_mode="uniform", hidden_size=8)
+        self.assertEqual(clf.pool_mode, "uniform")
+        self.assertEqual(len(clf.mix.logits), 5)
+        self.assertFalse(clf.mix.logits.requires_grad)
+        with self.assertRaises(ValueError):
+            FullWavLMClassifier(m, pool_mode="bogus", hidden_size=8)
+
+    def test_strict_freeze_predicate(self):
+        self.assertTrue(is_full_ft_trainable("encoder.layers.0.weight"))
+        self.assertTrue(is_full_ft_trainable("encoder.layer_norm.weight"))
+        self.assertFalse(is_full_ft_trainable("feature_extractor.conv.weight"))
+        self.assertFalse(is_full_ft_trainable("feature_projection.projection.weight"))
+        self.assertFalse(is_full_ft_trainable("encoder.pos_conv_embed.conv.weight"))
+
+    def test_pad_batch_refuses_missing_attention_mask(self):
+        from fine_tuning.full_ft import _pad_batch
+
+        class NoMaskProcessor:
+            def __call__(self, waves, **kwargs):
+                return {"input_values": torch.zeros(len(waves), 10)}
+
+        with self.assertRaises(RuntimeError):
+            _pad_batch([np.zeros(10), np.zeros(8)], NoMaskProcessor(), "cpu")
+
+
+class TestFullFtHeadlineAndResume(unittest.TestCase):
+    def test_progress_identity_rejects_stale_file(self):
+        from fine_tuning.full_ft_utils import load_fold_progress, save_fold_progress
+
+        with tempfile.TemporaryDirectory() as tmp:
+            identity = {"fingerprint": "one"}
+            state = load_fold_progress(Path(tmp), 2, identity)
+            save_fold_progress(Path(tmp), 2, state)
+            with self.assertRaises(RuntimeError):
+                load_fold_progress(Path(tmp), 2, {"fingerprint": "two"})
+
+    def test_headline_gate_requires_both_conditions(self):
+        from fine_tuning.full_ft import apply_headline_gate
+
+        y = np.tile(np.arange(3), 40)
+        groups = np.array([f"q{i // 3}" for i in range(len(y))])
+        perfect = y.copy()
+        wrong = (y + 1) % 3
+        seeds = (42, 43, 44)
+        out = apply_headline_gate(
+            y=y,
+            groups=groups,
+            full_by_seed={seed: perfect for seed in seeds},
+            matched_frozen_by_seed={seed: wrong for seed in seeds},
+            partial_by_seed={seed: wrong for seed in seeds},
+            tuned_frozen=perfect,
+            partial_separately_tuned_frozen=wrong,
+            point_margin=0.01,
+            n_resamples=200,
+        )
+        self.assertTrue(out["condition_a_full_vs_partial"]["pass"])
+        self.assertTrue(out["condition_b_full_vs_matched_frozen"]["pass"])
+        self.assertEqual(out["headline"], "full_ft")
+        self.assertIn("comparative_training_gain", out)
+
+    def test_frozen_headline_requires_a_and_c(self):
+        from fine_tuning.full_ft_utils import decide_headline
+
+        self.assertEqual(
+            decide_headline(a_pass=True, b_pass=False, c_pass=True),
+            "frozen_uniform_25",
+        )
+        self.assertEqual(
+            decide_headline(a_pass=False, b_pass=False, c_pass=True),
+            "partial_ft",
+        )
+
+    def test_alignment_checks_questions_and_exact_clip_set(self):
+        from fine_tuning.full_ft import align_partial_preds
+
+        frame = pd.DataFrame(
+            {"clip_id": ["a", "b"], "question": ["q1", "q2"], "y": [0, 1]}
+        )
+        partial = pd.DataFrame(
+            {
+                "clip_id": ["b", "a"],
+                "question": ["q2", "q1"],
+                "y_true": [1, 0],
+                "pred_baseline": [1, 0],
+                "pred_seed_42": [1, 0],
+                "pred_seed_43": [1, 0],
+                "pred_seed_44": [1, 0],
+            }
+        )
+        aligned = align_partial_preds(frame, partial)
+        np.testing.assert_array_equal(aligned["by_seed"][42], [0, 1])
+        changed = partial.copy()
+        changed.loc[changed["clip_id"] == "a", "question"] = "changed"
+        with self.assertRaises(ValueError):
+            align_partial_preds(frame, changed)
 
 
 class TestDataAndMetrics(unittest.TestCase):
