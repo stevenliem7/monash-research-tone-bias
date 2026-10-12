@@ -26,6 +26,21 @@ from fine_tuning.data import (
     manifest_fingerprint,
 )
 from fine_tuning.honest_gate0 import build_honest_gate0_report
+from fine_tuning.full_ft_utils import (
+    anchor_check,
+    atomic_write_json,
+    check_partition,
+    file_sha256,
+    fold_progress_path,
+    leakage_verdict,
+    load_fold_progress,
+    locked_config_from_folds,
+    matched_encoder_epochs,
+    missing_fold_items,
+    save_fold_progress,
+    score_index_hash,
+    stable_fingerprint,
+)
 from fine_tuning.metrics import (
     classification_report_dict,
     earliest_within_one_se,
@@ -58,16 +73,34 @@ from fine_tuning.paths import (
     CACHE_FORMAT_VERSION,
     CORPUS_FINAL_AUDIO_DIR,
     ENCODER_LRS,
+    FULL_FT_ANCHOR_TOLERANCE,
+    FULL_FT_BATCH_SIZE,
+    FULL_FT_ENCODER_LRS,
+    FULL_FT_EPOCH_CHECKPOINTS,
+    FULL_FT_HEAD_LRS,
+    FULL_FT_HEAD_PRETRAIN_EPOCHS,
+    FULL_FT_HEAD_WARMUP_EPOCHS,
+    FULL_FT_LEAKAGE_CONCERN_GAP,
+    FULL_FT_LEAKAGE_SAFE_GAP,
+    FULL_FT_MARGIN_DELTA,
+    FULL_FT_NEG_F1_MARGIN,
+    FULL_FT_N_RESAMPLES,
+    FULL_FT_PRIMARY_POOL,
+    FULL_FT_SECONDARY_POOL,
+    FULL_FT_TRAIN_POS_CONV_AND_PROJECTION,
+    FULL_FT_WARMUP_STEPS,
+    GATE0_REPEAT0_UNIFORM_MLP,
     OUTER_SEEDS,
     PRIMARY_SEED,
     PROBE_LAYERS,
     PROTOCOL_VERSION,
+    REPO_ROOT,
     SCALAR_LRS,
     SPLIT_MANIFEST_CSV,
     WAVLM_FINETUNED_ROOT,
     WAVLM_MODEL_ID,
 )
-from fine_tuning.splits import FoldSpec, inner_folds, outer_folds
+from fine_tuning.splits import FoldSpec, LabelAccessGuard, inner_folds, outer_folds
 
 
 @dataclass
@@ -90,6 +123,14 @@ class ExperimentConfig:
     use_partial_ft: bool = True
     gate0_max_epochs: int = 100
     nested_inner_max_epochs: int = 15
+    full_ft_smoke_clips: int = FULL_FT_BATCH_SIZE
+    full_ft_batch_size: int = FULL_FT_BATCH_SIZE
+    full_ft_head_pretrain_epochs: int = FULL_FT_HEAD_PRETRAIN_EPOCHS
+    full_ft_margin: float = FULL_FT_MARGIN_DELTA
+    full_ft_arms: tuple[str, ...] = (FULL_FT_PRIMARY_POOL,)
+    full_ft_outer_fold: int | None = None  # Slurm array: run one outer fold
+    full_ft_aggregate_only: bool = False
+    partial_oof_csv: Path | None = None
     pooled_provider: Callable[..., Any] | None = None
     wav_loader: Callable[[Path], np.ndarray] | None = None
 
@@ -115,8 +156,7 @@ def _dirs(cfg: ExperimentConfig) -> dict[str, Path]:
 
 
 def _write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    atomic_write_json(path, payload)
 
 
 def _update_run_state(path: Path, **kwargs: Any) -> None:
@@ -290,6 +330,680 @@ def _partial_training_context(cfg: ExperimentConfig) -> dict:
         "boundary_bundle": boundary_bundle,
         "frame_lengths": frame_lengths,
     }
+
+
+def _default_partial_oof_path() -> Path:
+    return REPO_ROOT.parent / "wavlm_partial_latest" / "reports" / "oof_predictions.csv"
+
+
+def _full_ft_protocol_identity(cfg: ExperimentConfig, frame: pd.DataFrame) -> dict:
+    code_files = [
+        Path(__file__),
+        Path(__file__).with_name("full_ft.py"),
+        Path(__file__).with_name("full_ft_utils.py"),
+        Path(__file__).with_name("model.py"),
+        Path(__file__).with_name("optimise.py"),
+        Path(__file__).with_name("paths.py"),
+        Path(__file__).with_name("splits.py"),
+        Path(__file__).with_name("data.py"),
+        Path(__file__).with_name("cache.py"),
+    ]
+    pooled_cache = cfg.output_dir / "cache" / "pooled_all_layers.pt"
+    audio_root = Path(cfg.corpora_root).resolve()
+    audio_stats = []
+    if audio_root.is_dir():
+        for clip_id in frame["clip_id"].astype(str):
+            path = audio_root / f"{clip_id}.wav"
+            if path.is_file():
+                stat = path.stat()
+                audio_stats.append(
+                    (clip_id, int(stat.st_size), int(stat.st_mtime_ns))
+                )
+    payload = {
+        "protocol_version": PROTOCOL_VERSION,
+        "manifest_sha256": file_sha256(cfg.manifest_path),
+        "rows_sha256": stable_fingerprint(
+            frame[["clip_id", "question", "y"]].astype(str).to_dict("records")
+        ),
+        "model_id": cfg.model_id,
+        "audio_root": str(audio_root),
+        "audio_stats_sha256": stable_fingerprint(audio_stats),
+        "pooled_cache_sha256": (
+            file_sha256(pooled_cache) if pooled_cache.is_file() else None
+        ),
+        "outer_folds": cfg.outer_folds,
+        "inner_folds": cfg.inner_folds,
+        "split_seed": cfg.seed,
+        "outer_seeds": list(OUTER_SEEDS),
+        "arms": list(cfg.full_ft_arms),
+        "encoder_lrs": list(FULL_FT_ENCODER_LRS),
+        "head_lrs": list(FULL_FT_HEAD_LRS),
+        "epochs": list(FULL_FT_EPOCH_CHECKPOINTS),
+        "batch_size": cfg.full_ft_batch_size,
+        "head_pretrain_epochs": cfg.full_ft_head_pretrain_epochs,
+        "warmup_steps": FULL_FT_WARMUP_STEPS,
+        "train_pos_conv_and_projection": FULL_FT_TRAIN_POS_CONV_AND_PROJECTION,
+        "code_sha256": {path.name: file_sha256(path) for path in code_files},
+    }
+    return {"fingerprint": stable_fingerprint(payload), "payload": payload}
+
+
+def stage_full_ft_smoke(cfg: ExperimentConfig) -> dict:
+    from fine_tuning.full_ft import run_full_ft_smoke
+
+    paths = _dirs(cfg)
+    frame = load_frame(cfg)
+    pooled_stack = None
+    if (paths["cache"] / "pooled_all_layers.pt").is_file():
+        fingerprint = manifest_fingerprint(cfg.manifest_path)
+        pooled_stack = _align_pooled(
+            frame,
+            load_pooled_cache(paths["cache"], _cache_expected(cfg, fingerprint)),
+        )
+    report = run_full_ft_smoke(
+        frame=frame,
+        corpora_root=cfg.corpora_root,
+        model_id=cfg.model_id,
+        device=_device(cfg),
+        seed=cfg.seed,
+        n_clips=cfg.full_ft_smoke_clips,
+        pool_modes=(FULL_FT_PRIMARY_POOL, FULL_FT_SECONDARY_POOL),
+        pooled_stack=pooled_stack,
+    )
+    if pooled_stack is None:
+        report["cache_parity"] = "skipped: run layer-cache first"
+    _write_json(paths["reports"] / "full_ft_smoke.json", report)
+    _update_run_state(paths["run_state"], stage="full-ft-smoke", status="done")
+    return report
+
+
+def _full_ft_fold_seed(seed: int, fold: int) -> int:
+    return int(seed) + 1000 * int(fold)
+
+
+def _full_ft_run_fold(
+    *,
+    cfg: ExperimentConfig,
+    outer: FoldSpec,
+    inners: list[FoldSpec],
+    ctx: dict,
+    pooled_stack: np.ndarray,
+    y: np.ndarray,
+    arms: tuple[str, ...],
+    identity: dict,
+) -> dict:
+    from fine_tuning.full_ft import (
+        select_full_ft_config_inner,
+        train_eval_full_ft_honest,
+    )
+
+    root = _dirs(cfg)["root"]
+    fold = int(outer.fold)
+    state = load_fold_progress(root, fold, identity)
+    expected_hash = score_index_hash(outer.score)
+    if state.get("score_idx") is not None:
+        if score_index_hash(state["score_idx"]) != expected_hash:
+            raise RuntimeError(f"fold {fold}: stored score indices differ")
+        if state.get("score_hash") != expected_hash:
+            raise RuntimeError(f"fold {fold}: stored score hash differs")
+    if state.get("status") == "done" and not missing_fold_items(
+        state, arms, OUTER_SEEDS
+    ):
+        return state
+
+    state["status"] = "running"
+    state["score_idx"] = outer.score.astype(int).tolist()
+    state["score_hash"] = expected_hash
+
+    def persist() -> None:
+        save_fold_progress(root, fold, state)
+
+    persist()
+    if not state.get("tuned_frozen"):
+        tuned = train_eval_pooled_honest(
+            X=pooled_stack,
+            y=y,
+            outer=outer,
+            inners=inners,
+            learn_mix=False,
+            scalar_lr=None,
+            seed=cfg.seed,
+            device=ctx["device"],
+            max_epochs=100,
+        )
+        state["tuned_frozen"] = {
+            "pred": np.asarray(tuned["pred"], dtype=np.int64).tolist(),
+            "meta": tuned.get("selected", {}),
+            "audit": tuned.get("audit"),
+            "control_type": "separately_tuned_frozen_uniform_25",
+        }
+        persist()
+
+    for arm in arms:
+        arm_state = state["arms"].setdefault(arm, {"seeds": {}})
+        if "selected" not in arm_state:
+            guard = LabelAccessGuard(outer)
+            arm_state["selected"] = select_full_ft_config_inner(
+                ctx=ctx,
+                y=y,
+                inners=inners,
+                guard=guard,
+                seed=cfg.seed,
+                pool_mode=arm,
+                batch_size=cfg.full_ft_batch_size,
+                head_pretrain_epochs=cfg.full_ft_head_pretrain_epochs,
+                store=state["selection_runs"],
+                persist=persist,
+                progress_label=f"full-ft fold{fold} {arm}",
+            )
+            arm_state["selection_audit"] = guard.summary()
+            persist()
+        selected = arm_state["selected"]
+        for seed in OUTER_SEEDS:
+            if str(seed) in arm_state["seeds"]:
+                continue
+            result = train_eval_full_ft_honest(
+                ctx=ctx,
+                y=y,
+                outer=outer,
+                inners=inners,
+                selected=selected,
+                seed=_full_ft_fold_seed(seed, fold),
+                pool_mode=arm,
+                batch_size=cfg.full_ft_batch_size,
+                head_pretrain_epochs=cfg.full_ft_head_pretrain_epochs,
+                progress_label=f"full-ft fold{fold} {arm} seed{seed}",
+            )
+            arm_state["seeds"][str(seed)] = {
+                "pred_full": result["pred_full"].tolist(),
+                "pred_matched_frozen": result["pred_matched_frozen"].tolist(),
+                "meta": result["selected"],
+                "diagnostics": result["diagnostics"],
+                "audit": result["audit"],
+            }
+            persist()
+    state["status"] = "done"
+    persist()
+    return state
+
+
+def _full_ft_aggregate(
+    *,
+    cfg: ExperimentConfig,
+    frame: pd.DataFrame,
+    y: np.ndarray,
+    groups: np.ndarray,
+    arms: tuple[str, ...],
+    primary_arm: str,
+    states: list[dict],
+    identity: dict,
+) -> dict:
+    from fine_tuning.full_ft import (
+        align_partial_preds,
+        apply_headline_gate,
+        load_partial_oof,
+    )
+
+    states = sorted(states, key=lambda state: int(state["fold"]))
+    for state in states:
+        if state.get("identity") != identity:
+            raise RuntimeError(f"fold {state.get('fold')}: protocol fingerprint differs")
+        if score_index_hash(state["score_idx"]) != state["score_hash"]:
+            raise RuntimeError(f"fold {state.get('fold')}: score hash is stale")
+    check_partition([state["score_idx"] for state in states], len(y))
+
+    tuned_frozen = np.full(len(y), -1, dtype=np.int64)
+    full_oof = {
+        arm: {
+            seed: np.full(len(y), -1, dtype=np.int64) for seed in OUTER_SEEDS
+        }
+        for arm in arms
+    }
+    matched_oof = {
+        arm: {
+            seed: np.full(len(y), -1, dtype=np.int64) for seed in OUTER_SEEDS
+        }
+        for arm in arms
+    }
+    fold_rows: list[dict] = []
+    for state in states:
+        idx = np.asarray(state["score_idx"], dtype=np.int64)
+        tuned_frozen[idx] = np.asarray(
+            state["tuned_frozen"]["pred"], dtype=np.int64
+        )
+        row: dict[str, Any] = {
+            "fold": int(state["fold"]),
+            "score_hash": state["score_hash"],
+            "tuned_frozen": {
+                "meta": state["tuned_frozen"].get("meta"),
+                "audit": state["tuned_frozen"].get("audit"),
+                "control_type": "separately_tuned_frozen_uniform_25",
+            },
+        }
+        for arm in arms:
+            arm_state = state["arms"][arm]
+            row[arm] = {
+                "selected": arm_state["selected"],
+                "selection_audit": arm_state.get("selection_audit"),
+                "seeds": {},
+            }
+            for seed in OUTER_SEEDS:
+                seed_state = arm_state["seeds"][str(seed)]
+                full_oof[arm][seed][idx] = np.asarray(
+                    seed_state["pred_full"], dtype=np.int64
+                )
+                matched_oof[arm][seed][idx] = np.asarray(
+                    seed_state["pred_matched_frozen"], dtype=np.int64
+                )
+                row[arm]["seeds"][str(seed)] = {
+                    "meta": seed_state["meta"],
+                    "diagnostics": seed_state["diagnostics"],
+                    "audit": seed_state["audit"],
+                }
+        row["tuned_frozen_macro_f1"] = classification_report_dict(
+            y[idx], tuned_frozen[idx]
+        )["macro_f1"]
+        row["primary_full_macro_f1"] = classification_report_dict(
+            y[idx], full_oof[primary_arm][PRIMARY_SEED][idx]
+        )["macro_f1"]
+        row["primary_matched_frozen_macro_f1"] = classification_report_dict(
+            y[idx], matched_oof[primary_arm][PRIMARY_SEED][idx]
+        )["macro_f1"]
+        fold_rows.append(row)
+
+    partial_path = cfg.partial_oof_csv or _default_partial_oof_path()
+    if not Path(partial_path).is_file():
+        raise FileNotFoundError(f"partial OOF required: {partial_path}")
+    partial = align_partial_preds(frame, load_partial_oof(Path(partial_path)))
+    gate = apply_headline_gate(
+        y=y,
+        groups=groups,
+        full_by_seed=full_oof[primary_arm],
+        matched_frozen_by_seed=matched_oof[primary_arm],
+        partial_by_seed=partial["by_seed"],
+        tuned_frozen=tuned_frozen,
+        partial_separately_tuned_frozen=partial["separately_tuned_frozen"],
+        primary_seed=PRIMARY_SEED,
+        point_margin=cfg.full_ft_margin,
+        negative_f1_margin=FULL_FT_NEG_F1_MARGIN,
+        n_resamples=FULL_FT_N_RESAMPLES,
+    )
+    gate["partial_oof_csv"] = str(partial_path)
+    gate["n_aligned_clips"] = len(y)
+
+    locked = locked_config_from_folds(fold_rows, primary_arm)
+    tuned_macro = classification_report_dict(y, tuned_frozen)["macro_f1"]
+    anchor = (
+        anchor_check(
+            tuned_macro,
+            GATE0_REPEAT0_UNIFORM_MLP,
+            FULL_FT_ANCHOR_TOLERANCE,
+        )
+        if cfg.limit is None
+        else {"skipped": "limit set"}
+    )
+    report = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "protocol_version": PROTOCOL_VERSION,
+        "identity": identity,
+        "protocol": {
+            "outer": f"StratifiedGroupKFold({cfg.outer_folds})",
+            "inner": f"StratifiedGroupKFold({cfg.inner_folds})",
+            "group_by": "question",
+            "outer_seeds": list(OUTER_SEEDS),
+            "primary_seed": PRIMARY_SEED,
+            "primary_arm": primary_arm,
+            "arms": list(arms),
+            "joint_selection": "(encoder_lr, head_lr, epoch) at shared checkpoints",
+            "epoch_checkpoints": list(FULL_FT_EPOCH_CHECKPOINTS),
+            "batch_size": cfg.full_ft_batch_size,
+            "head_pretrain_epochs": cfg.full_ft_head_pretrain_epochs,
+            "warmup_steps_from_encoder_unfreeze": FULL_FT_WARMUP_STEPS,
+            "train_pos_conv_and_projection": FULL_FT_TRAIN_POS_CONV_AND_PROJECTION,
+            "spec_augment": False,
+            "layerdrop": 0.0,
+        },
+        "outer_folds": fold_rows,
+        "locked_config": locked,
+        "oof_separately_tuned_frozen": classification_report_dict(y, tuned_frozen),
+        "oof_matched_frozen": classification_report_dict(
+            y, matched_oof[primary_arm][PRIMARY_SEED]
+        ),
+        "oof_finetuned": classification_report_dict(
+            y, full_oof[primary_arm][PRIMARY_SEED]
+        ),
+        "anchor_tuned_frozen_vs_gate0_repeat0": anchor,
+        "headline_gate": gate,
+        "arm_reports": {
+            arm: {
+                "seed_reports": {
+                    str(seed): classification_report_dict(y, full_oof[arm][seed])
+                    for seed in OUTER_SEEDS
+                }
+            }
+            for arm in arms
+        },
+    }
+    paths = _dirs(cfg)
+    reports = paths["reports"]
+    _write_json(reports / "full_ft_nested_cv.json", report)
+    _write_json(
+        reports / "paired_vs_partial.json",
+        gate["condition_a_full_vs_partial"],
+    )
+    _write_json(
+        reports / "paired_vs_own_frozen.json",
+        gate["condition_b_full_vs_matched_frozen"],
+    )
+    _write_json(
+        reports / "paired_frozen_vs_partial.json",
+        gate["condition_c_tuned_frozen_vs_partial"],
+    )
+    _write_json(
+        reports / "comparative_training_gain.json",
+        gate["comparative_training_gain"],
+    )
+    columns: dict[str, Any] = {
+        "clip_id": frame["clip_id"],
+        "question": frame["question"],
+        "y_true": y,
+        "pred_tuned_frozen": tuned_frozen,
+    }
+    for arm in arms:
+        for seed in OUTER_SEEDS:
+            columns[f"pred_{arm}_seed_{seed}"] = full_oof[arm][seed]
+            columns[f"pred_{arm}_matched_frozen_seed_{seed}"] = matched_oof[arm][seed]
+    pd.DataFrame(columns).to_csv(
+        reports / "oof_predictions_full_ft.csv", index=False
+    )
+    _update_run_state(
+        paths["run_state"],
+        stage="full-ft-nested",
+        status="done",
+        locked=locked,
+        headline=gate["headline"],
+        protocol_version=PROTOCOL_VERSION,
+    )
+    return report
+
+
+def stage_full_ft_nested(cfg: ExperimentConfig) -> dict:
+    from fine_tuning.full_ft import make_full_ft_context
+
+    paths = _dirs(cfg)
+    frame = load_frame(cfg)
+    y = frame["y"].to_numpy()
+    groups = frame["question"].to_numpy()
+    arms = tuple(cfg.full_ft_arms or (FULL_FT_PRIMARY_POOL,))
+    primary_arm = FULL_FT_PRIMARY_POOL if FULL_FT_PRIMARY_POOL in arms else arms[0]
+    identity = _full_ft_protocol_identity(cfg, frame)
+    outers = list(
+        outer_folds(y, groups, n_splits=cfg.outer_folds, seed=cfg.seed)
+    )
+
+    if cfg.full_ft_aggregate_only:
+        if cfg.full_ft_outer_fold is not None:
+            raise ValueError("aggregate-only cannot be combined with an outer fold")
+        states: list[dict] = []
+        problems: dict[int, list[str]] = {}
+        for outer in outers:
+            state = load_fold_progress(paths["root"], outer.fold, identity)
+            missing = missing_fold_items(state, arms, OUTER_SEEDS)
+            if state.get("score_idx") is not None:
+                recomputed = score_index_hash(state["score_idx"])
+                if recomputed != state.get("score_hash"):
+                    missing.append("stored score hash does not match stored indices")
+                if recomputed != score_index_hash(outer.score):
+                    missing.append("stored score indices differ from recomputed fold")
+            if missing:
+                problems[int(outer.fold)] = missing
+            states.append(state)
+        if problems:
+            raise RuntimeError(f"aggregate-only refuses incomplete folds: {problems}")
+        return _full_ft_aggregate(
+            cfg=cfg,
+            frame=frame,
+            y=y,
+            groups=groups,
+            arms=arms,
+            primary_arm=primary_arm,
+            states=states,
+            identity=identity,
+        )
+
+    fingerprint = manifest_fingerprint(cfg.manifest_path)
+    pooled_stack = _align_pooled(
+        frame,
+        load_pooled_cache(paths["cache"], _cache_expected(cfg, fingerprint)),
+    )
+    ctx = make_full_ft_context(
+        frame=frame,
+        corpora_root=cfg.corpora_root,
+        model_id=cfg.model_id,
+        device=_device(cfg),
+        pooled_stack=pooled_stack,
+        wav_loader=cfg.wav_loader,
+    )
+    if cfg.full_ft_outer_fold is not None:
+        targets = [outer for outer in outers if outer.fold == cfg.full_ft_outer_fold]
+        if not targets:
+            raise ValueError("full_ft_outer_fold outside configured fold range")
+    else:
+        targets = outers
+    states = []
+    for outer in targets:
+        states.append(
+            _full_ft_run_fold(
+                cfg=cfg,
+                outer=outer,
+                inners=inner_folds(
+                    outer, y, groups, n_splits=cfg.inner_folds, seed=cfg.seed
+                ),
+                ctx=ctx,
+                pooled_stack=pooled_stack,
+                y=y,
+                arms=arms,
+                identity=identity,
+            )
+        )
+    if cfg.full_ft_outer_fold is not None:
+        return {
+            "status": "fold_done",
+            "outer_fold": int(cfg.full_ft_outer_fold),
+            "progress": str(
+                fold_progress_path(paths["root"], cfg.full_ft_outer_fold)
+            ),
+            "durations": ctx["durations"],
+            "identity": identity,
+        }
+    return _full_ft_aggregate(
+        cfg=cfg,
+        frame=frame,
+        y=y,
+        groups=groups,
+        arms=arms,
+        primary_arm=primary_arm,
+        states=states,
+        identity=identity,
+    )
+
+
+def stage_full_ft_leakage(cfg: ExperimentConfig) -> dict:
+    from fine_tuning.full_ft import (
+        _seeded_model,
+        _train_config,
+        make_full_ft_context,
+        paired_leakage_gap_bootstrap,
+        predict_full_ft,
+        pretrain_head_on_cache,
+        train_full_ft_fixed,
+    )
+
+    paths = _dirs(cfg)
+    nested_path = paths["reports"] / "full_ft_nested_cv.json"
+    if not nested_path.is_file():
+        raise FileNotFoundError("run full-ft-nested aggregation first")
+    nested = json.loads(nested_path.read_text(encoding="utf-8"))
+    locked = nested["locked_config"]
+    if locked.get("epoch") is None:
+        raise RuntimeError(f"incomplete locked config: {locked}")
+    frame = load_frame(cfg)
+    y = frame["y"].to_numpy()
+    groups = frame["question"].to_numpy()
+    protocol_identity = _full_ft_protocol_identity(cfg, frame)
+    if nested.get("identity") != protocol_identity:
+        raise RuntimeError(
+            "current full-FT protocol fingerprint differs from aggregated nested run"
+        )
+    leakage_identity = {
+        "fingerprint": stable_fingerprint(
+            {
+                "protocol": protocol_identity["fingerprint"],
+                "locked": locked,
+                "kind": "grouped_vs_random",
+                "n_resamples": FULL_FT_N_RESAMPLES,
+            }
+        ),
+        "protocol": protocol_identity,
+        "locked": locked,
+    }
+    fingerprint = manifest_fingerprint(cfg.manifest_path)
+    pooled_stack = _align_pooled(
+        frame,
+        load_pooled_cache(paths["cache"], _cache_expected(cfg, fingerprint)),
+    )
+    ctx = make_full_ft_context(
+        frame=frame,
+        corpora_root=cfg.corpora_root,
+        model_id=cfg.model_id,
+        device=_device(cfg),
+        pooled_stack=pooled_stack,
+        wav_loader=cfg.wav_loader,
+    )
+    progress_path = paths["root"] / "full_ft_progress" / "leakage.json"
+    if progress_path.is_file():
+        state = json.loads(progress_path.read_text(encoding="utf-8"))
+        if state.get("identity") != leakage_identity:
+            raise RuntimeError("stale leakage progress fingerprint")
+    else:
+        state = {"identity": leakage_identity, "grouped": {}, "random": {}}
+
+    def run_family(kind: str, specs: list[FoldSpec]) -> np.ndarray:
+        oof = np.full(len(y), -1, dtype=np.int64)
+        for outer in specs:
+            key = str(outer.fold)
+            expected_hash = score_index_hash(outer.score)
+            stored = state[kind].get(key)
+            if stored:
+                if score_index_hash(stored["score_idx"]) != stored["score_hash"]:
+                    raise RuntimeError(f"stale leakage {kind} fold {key} hash")
+                if stored["score_hash"] != expected_hash:
+                    raise RuntimeError(f"stale leakage {kind} fold {key} split")
+            else:
+                seed = _full_ft_fold_seed(cfg.seed, outer.fold)
+                labels = y[outer.fit]
+                model = _seeded_model(ctx, str(locked["pool_mode"]), seed)
+                pretrain_head_on_cache(
+                    model,
+                    pooled_stack=pooled_stack,
+                    rows=outer.fit,
+                    labels=labels,
+                    pool_mode=str(locked["pool_mode"]),
+                    head_lr=float(locked["head_lr"]),
+                    epochs=cfg.full_ft_head_pretrain_epochs,
+                    seed=seed,
+                    device=ctx["device"],
+                    batch_size=cfg.full_ft_batch_size,
+                )
+                inner_size = int(
+                    round(len(outer.fit) * (cfg.inner_folds - 1) / cfg.inner_folds)
+                )
+                epochs = matched_encoder_epochs(
+                    inner_encoder_epochs=int(locked["epoch"]),
+                    n_inner_fit=inner_size,
+                    n_outer_fit=len(outer.fit),
+                    batch_size=cfg.full_ft_batch_size,
+                )
+                train_full_ft_fixed(
+                    model,
+                    row_indices=outer.fit,
+                    labels=labels,
+                    class_weights=class_weights_from_y(labels),
+                    batcher=ctx["make_batcher"](),
+                    config=_train_config(
+                        encoder_lr=float(locked["encoder_lr"]),
+                        head_lr=float(locked["head_lr"]),
+                        encoder_epochs=epochs,
+                        seed=seed,
+                        batch_size=cfg.full_ft_batch_size,
+                    ),
+                    device=ctx["device"],
+                    epoch_checkpoints=(),
+                    progress_label=f"full-ft-leakage {kind} fold{outer.fold}",
+                )
+                predictions = predict_full_ft(
+                    model,
+                    row_indices=outer.score,
+                    batcher=ctx["make_batcher"](),
+                    device=ctx["device"],
+                    batch_size=cfg.full_ft_batch_size,
+                )
+                stored = {
+                    "score_idx": outer.score.astype(int).tolist(),
+                    "score_hash": expected_hash,
+                    "pred": predictions.tolist(),
+                    "encoder_epochs": epochs,
+                }
+                state[kind][key] = stored
+                atomic_write_json(progress_path, state)
+            oof[outer.score] = np.asarray(stored["pred"], dtype=np.int64)
+        return oof
+
+    grouped_specs = list(
+        outer_folds(y, groups, n_splits=cfg.outer_folds, seed=cfg.seed)
+    )
+    random_specs = [
+        FoldSpec(fit=train, score=test, fold=fold, label=f"random[{fold}]")
+        for fold, (train, test) in enumerate(
+            make_random_folds(y, cfg.outer_folds, cfg.seed)
+        )
+    ]
+    grouped_predictions = run_family("grouped", grouped_specs)
+    random_predictions = run_family("random", random_specs)
+    gap = paired_leakage_gap_bootstrap(
+        y=y,
+        groups=groups,
+        grouped_predictions=grouped_predictions,
+        random_predictions=random_predictions,
+        seed=cfg.seed,
+        n_boot=FULL_FT_N_RESAMPLES,
+    )
+    report = {
+        "protocol_version": PROTOCOL_VERSION,
+        "identity": leakage_identity,
+        "locked_config": locked,
+        "grouped": classification_report_dict(y, grouped_predictions),
+        "random": classification_report_dict(y, random_predictions),
+        "random_minus_grouped_macro_f1": gap,
+        "thresholds": {
+            "safe_below": FULL_FT_LEAKAGE_SAFE_GAP,
+            "concern_above": FULL_FT_LEAKAGE_CONCERN_GAP,
+        },
+        "verdict": leakage_verdict(
+            gap["ci95"],
+            safe_below=FULL_FT_LEAKAGE_SAFE_GAP,
+            concern_above=FULL_FT_LEAKAGE_CONCERN_GAP,
+        ),
+        "note": "diagnostic conditional on one grouped and one random fold assignment",
+    }
+    _write_json(paths["reports"] / "full_ft_leakage.json", report)
+    _update_run_state(
+        paths["run_state"],
+        stage="full-ft-leakage",
+        status="done",
+        verdict=report["verdict"],
+    )
+    return report
 
 
 def stage_frozen_gate(cfg: ExperimentConfig) -> dict:
@@ -1062,6 +1776,11 @@ def run_experiment(cfg: ExperimentConfig) -> dict:
     """
     paths = _dirs(cfg)
     stage = cfg.stage
+    fold_array_task = (
+        stage == "full-ft-nested"
+        and cfg.full_ft_outer_fold is not None
+        and not cfg.full_ft_aggregate_only
+    )
     # Full pipeline = measure partial FT end-to-end; do not early-exit on Gate 0.
     if stage == "all" and not cfg.ignore_gate0:
         cfg.ignore_gate0 = True
@@ -1069,13 +1788,15 @@ def run_experiment(cfg: ExperimentConfig) -> dict:
             "[run] stage=all: forcing nested partial FT "
             "(Gate 0 prefer_frozen_mix will not skip nested-cv)"
         )
-    _update_run_state(
-        paths["run_state"],
-        stage=stage,
-        status="running",
-        protocol_version=PROTOCOL_VERSION,
-        ignore_gate0=cfg.ignore_gate0,
-    )
+    # Array tasks own separate fold files. Never race on shared run_state.json.
+    if not fold_array_task:
+        _update_run_state(
+            paths["run_state"],
+            stage=stage,
+            status="running",
+            protocol_version=PROTOCOL_VERSION,
+            ignore_gate0=cfg.ignore_gate0,
+        )
     results: dict[str, Any] = {}
     order = (
         [
@@ -1096,10 +1817,14 @@ def run_experiment(cfg: ExperimentConfig) -> dict:
         "nested-cv": stage_nested_cv,
         "leakage-check": stage_leakage_check,
         "train-full": stage_train_full,
+        "full-ft-smoke": stage_full_ft_smoke,
+        "full-ft-nested": stage_full_ft_nested,
+        "full-ft-leakage": stage_full_ft_leakage,
     }
     for name in order:
         print(f"[run] starting stage={name}")
         results[name] = dispatch[name](cfg)
         print(f"[run] finished stage={name}")
-    _update_run_state(paths["run_state"], stage=stage, status="done")
+    if not fold_array_task:
+        _update_run_state(paths["run_state"], stage=stage, status="done")
     return results
