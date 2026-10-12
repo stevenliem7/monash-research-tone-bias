@@ -11,6 +11,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from fine_tuning.paths import FULL_FT_TRAIN_POS_CONV_AND_PROJECTION
+
 _MASK_WARNINGS_SILENCED = False
 
 
@@ -161,6 +163,116 @@ def freeze_except_suffix(wavlm: nn.Module, plan: FreezePlan) -> list[str]:
             p.requires_grad = True
             trainable.append(f"encoder.layers.{i}.{name}")
     return trainable
+
+
+def is_full_ft_trainable(
+    name: str,
+    *,
+    train_pos_conv_and_projection: bool = FULL_FT_TRAIN_POS_CONV_AND_PROJECTION,
+) -> bool:
+    """Single source of truth for the dense full-FT freeze plan."""
+    if name.startswith("encoder.layers.") or name.startswith("encoder.layer_norm."):
+        return True
+    return train_pos_conv_and_projection and (
+        name.startswith("encoder.pos_conv_embed.")
+        or name.startswith("feature_projection.")
+    )
+
+
+def freeze_cnn_train_all_transformers(
+    wavlm: nn.Module,
+    *,
+    train_pos_conv_and_projection: bool = FULL_FT_TRAIN_POS_CONV_AND_PROJECTION,
+) -> list[str]:
+    trainable: list[str] = []
+    for name, parameter in wavlm.named_parameters():
+        parameter.requires_grad = is_full_ft_trainable(
+            name,
+            train_pos_conv_and_projection=train_pos_conv_and_projection,
+        )
+        if parameter.requires_grad:
+            trainable.append(name)
+    if not any(name.startswith("encoder.layers.") for name in trainable):
+        raise RuntimeError("full-FT freeze plan left no transformer layer trainable")
+    return trainable
+
+
+class FullWavLMClassifier(nn.Module):
+    """Waveform → WavLM (CNN frozen, all transformers trainable) → pool → head.
+
+    ``pool_mode='uniform'``: mean over all 25 hidden states (proj + 24 transformers).
+    ``pool_mode='final'``: mean-pool the last hidden state only.
+    ``pool_mode='mix'``: learned scalar mix over all 25 hidden-state pools.
+    """
+
+    def __init__(
+        self,
+        wavlm: nn.Module,
+        *,
+        pool_mode: str = "uniform",
+        hidden_size: int = 1024,
+        n_classes: int = 3,
+    ):
+        super().__init__()
+        if pool_mode not in ("uniform", "final", "mix"):
+            raise ValueError(
+                f"pool_mode must be 'uniform', 'final', or 'mix', got {pool_mode!r}"
+            )
+        self.wavlm = wavlm
+        self.pool_mode = pool_mode
+        self.n_transformer_layers = len(wavlm.encoder.layers)
+        device = next(wavlm.parameters()).device
+        self.mix = ScalarMix(self.n_transformer_layers + 1).to(device)
+        self.head = ValenceHead(hidden_size, n_classes).to(device)
+        freeze_cnn_train_all_transformers(wavlm)
+        if pool_mode != "mix":
+            self.mix.logits.requires_grad_(False)
+
+    def _frame_mask(
+        self,
+        hidden: torch.Tensor,
+        attention_mask: torch.Tensor | None,
+    ) -> torch.Tensor | None:
+        if attention_mask is None:
+            return None
+        # Sample-level mask → frame-level (WavLM CNN downsample).
+        get_mask = getattr(self.wavlm, "_get_feature_vector_attention_mask", None)
+        if get_mask is None:
+            raise RuntimeError(
+                "WavLM lacks _get_feature_vector_attention_mask; padded frames "
+                "cannot be excluded safely"
+            )
+        return get_mask(hidden.shape[1], attention_mask)
+
+    def pooled(
+        self,
+        input_values: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        out = self.wavlm(
+            input_values,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+        )
+        # hidden_states[0] = post feature projection; [1..L] = after each transformer.
+        hs = out.hidden_states
+        frame_mask = self._frame_mask(out.last_hidden_state, attention_mask)
+        if self.pool_mode == "final":
+            return mask_aware_mean_pool(out.last_hidden_state, frame_mask)
+        stacked = torch.stack(
+            [mask_aware_mean_pool(hidden, frame_mask) for hidden in hs],
+            dim=1,
+        )
+        if self.pool_mode == "uniform":
+            return stacked.mean(dim=1)
+        return self.mix(stacked)
+
+    def forward(
+        self,
+        input_values: torch.Tensor,
+        attention_mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        return self.head(self.pooled(input_values, attention_mask))
 
 
 class FrozenPooledClassifier(nn.Module):
